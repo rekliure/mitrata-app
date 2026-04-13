@@ -8,14 +8,32 @@ import { palette } from '@/lib/theme';
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
 
+  const handleSignOut = async () => {
+    await signOut();
+  };
+
+  const displayName =
+    user?.user_metadata?.display_name ||
+    user?.user_metadata?.name ||
+    user?.email?.split('@')[0] ||
+    'Mitrata User';
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <SectionTitle title="Profile" subtitle="Your calm digital identity for real-life connection." />
+      <SectionTitle
+        title="Profile"
+        subtitle="Your calm digital identity for real-life connection."
+      />
+
       <RetroCard style={styles.profileCard}>
-        <View style={styles.avatarWrap}><Text style={styles.avatar}>🌙</Text></View>
-        <Text style={styles.name}>{user?.name}</Text>
-        <Text style={styles.email}>{user?.email}</Text>
-        <Text style={styles.bio}>Curious, kind, and open to meaningful people over endless scrolling.</Text>
+        <View style={styles.avatarWrap}>
+          <Text style={styles.avatar}>🌙</Text>
+        </View>
+        <Text style={styles.name}>{displayName}</Text>
+        <Text style={styles.email}>{user?.email ?? 'No email found'}</Text>
+        <Text style={styles.bio}>
+          Curious, kind, and open to meaningful people over endless scrolling.
+        </Text>
       </RetroCard>
 
       <RetroCard>
@@ -26,7 +44,7 @@ export default function ProfileScreen() {
         <Text style={styles.item}>• Iterate the product from real usage</Text>
       </RetroCard>
 
-      <Pressable style={styles.button} onPress={() => void signOut()}>
+      <Pressable style={styles.button} onPress={handleSignOut}>
         <Text style={styles.buttonText}>Sign out</Text>
       </Pressable>
     </ScrollView>
@@ -37,13 +55,25 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.bg },
   content: { padding: 18, gap: 16, paddingBottom: 120 },
   profileCard: { alignItems: 'center', gap: 8 },
-  avatarWrap: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.surfaceStrong },
+  avatarWrap: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.surfaceStrong,
+  },
   avatar: { fontSize: 38 },
   name: { fontSize: 22, fontWeight: '800', color: palette.text },
   email: { color: palette.subtext },
   bio: { color: palette.text, lineHeight: 22, textAlign: 'center' },
   heading: { fontSize: 18, fontWeight: '700', color: palette.text, marginBottom: 10 },
   item: { color: palette.subtext, lineHeight: 22 },
-  button: { backgroundColor: palette.blush, borderRadius: 16, alignItems: 'center', paddingVertical: 14 },
+  button: {
+    backgroundColor: palette.blush,
+    borderRadius: 16,
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
   buttonText: { color: palette.text, fontWeight: '700' },
 });

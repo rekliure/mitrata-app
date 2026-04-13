@@ -6,9 +6,9 @@ import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { palette } from '@/lib/theme';
 
 function RootNavigator() {
-  const { isLoading } = useAuth();
+  const { loading } = useAuth();
 
-  if (isLoading) {
+  if (loading) {
     return (
       <View style={styles.loader}>
         <StatusBar style="dark" />
@@ -22,7 +22,7 @@ function RootNavigator() {
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
-        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(auth)/index" />
         <Stack.Screen name="(tabs)" />
       </Stack>
     </>

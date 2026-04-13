@@ -3,9 +3,21 @@ import { Redirect, Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/context/AuthContext';
 import { palette } from '@/lib/theme';
+import { ActivityIndicator, View } from 'react-native';
 
 export default function TabsLayout() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+
+
   if (!user) return <Redirect href="/(auth)" />;
 
   return (
