@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,7 +19,7 @@ import {
   getOutgoingRequests,
   updateRequestStatus,
 } from '@/lib/requests';
-import { getProfilesByUserIds } from '@/lib/social';
+import { getBlockedRelationships, getProfilesByUserIds } from '@/lib/social';
 import { palette } from '@/lib/theme';
 import type { ConnectionRequest, Profile } from '@/types';
 
@@ -30,22 +30,32 @@ export default function RequestsScreen() {
   const [profilesMap, setProfilesMap] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
 
-  const loadRequests = async () => {
+  const loadRequests = useCallback(async () => {
     if (!user) return;
 
     setLoading(true);
 
-    const [incomingResult, outgoingResult] = await Promise.all([
+    const [incomingResult, outgoingResult, blockedResult] = await Promise.all([
       getIncomingRequests(user.id),
       getOutgoingRequests(user.id),
+      getBlockedRelationships(user.id),
     ]);
 
-    setIncoming(incomingResult.data);
-    setOutgoing(outgoingResult.data);
+    const blockedIds = new Set(blockedResult.data ?? []);
+
+    const safeIncoming = incomingResult.data.filter(
+      (r) => !blockedIds.has(r.sender_user_id)
+    );
+    const safeOutgoing = outgoingResult.data.filter(
+      (r) => !blockedIds.has(r.receiver_user_id)
+    );
+
+    setIncoming(safeIncoming);
+    setOutgoing(safeOutgoing);
 
     const relatedIds = [
-      ...incomingResult.data.map((r) => r.sender_user_id),
-      ...outgoingResult.data.map((r) => r.receiver_user_id),
+      ...safeIncoming.map((r) => r.sender_user_id),
+      ...safeOutgoing.map((r) => r.receiver_user_id),
     ];
 
     const profilesResult = await getProfilesByUserIds(relatedIds);
@@ -56,19 +66,17 @@ export default function RequestsScreen() {
         map[profile.user_id] = profile;
       }
       setProfilesMap(map);
+    } else {
+      setProfilesMap({});
     }
 
     setLoading(false);
-  };
-
-  useEffect(() => {
-    void loadRequests();
-  }, []);
+  }, [user]);
 
   useFocusEffect(
     useCallback(() => {
       void loadRequests();
-    }, [user?.id])
+    }, [loadRequests])
   );
 
   const onAccept = async (request: ConnectionRequest) => {

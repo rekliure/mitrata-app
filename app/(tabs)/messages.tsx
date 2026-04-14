@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
+ Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,7 +22,7 @@ import {
   subscribeToMatchMessages,
 } from '@/lib/messages';
 import { unfriendMatch } from '@/lib/matches';
-import { getProfilesByUserIds } from '@/lib/social';
+import { getBlockedRelationships, getProfilesByUserIds } from '@/lib/social';
 import { palette } from '@/lib/theme';
 import type { Match, Message, Profile } from '@/types';
 
@@ -30,13 +30,18 @@ export default function MessagesScreen() {
   const { user } = useAuth();
 
   const [matches, setMatches] = useState<Match[]>([]);
-  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [profilesMap, setProfilesMap] = useState<Record<string, Profile>>({});
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [removing, setRemoving] = useState(false);
+
+  const hasLoadedOnceRef = useRef(false);
+
+  const selectedMatch =
+    matches.find((match) => match.id === selectedMatchId) ?? null;
 
   const loadMessages = async (matchId: string, markRead = false) => {
     if (markRead && user) {
@@ -57,25 +62,41 @@ export default function MessagesScreen() {
     setMessages(result.data);
   };
 
-  const loadMatches = async () => {
-    if (!user) return;
-
-    setLoading(true);
-
-    const result = await getMyMatches(user.id);
-
-    if (result.error) {
-      Alert.alert('Could not load matches', result.error);
+  const loadMatches = useCallback(async () => {
+    if (!user) {
       setMatches([]);
+      setSelectedMatchId(null);
       setMessages([]);
-      setSelectedMatch(null);
       setLoading(false);
       return;
     }
 
-    setMatches(result.data);
+    setLoading(true);
 
-    const otherUserIds = result.data.map((match) =>
+    const [matchesResult, blockedResult] = await Promise.all([
+      getMyMatches(user.id),
+      getBlockedRelationships(user.id),
+    ]);
+
+    if (matchesResult.error) {
+      Alert.alert('Could not load matches', matchesResult.error);
+      setMatches([]);
+      setSelectedMatchId(null);
+      setMessages([]);
+      setLoading(false);
+      return;
+    }
+
+    const blockedIds = new Set(blockedResult.data ?? []);
+
+    const safeMatches = matchesResult.data.filter((match) => {
+      const otherUserId = match.user_a === user.id ? match.user_b : match.user_a;
+      return !blockedIds.has(otherUserId);
+    });
+
+    setMatches(safeMatches);
+
+    const otherUserIds = safeMatches.map((match) =>
       match.user_a === user.id ? match.user_b : match.user_a
     );
 
@@ -87,55 +108,64 @@ export default function MessagesScreen() {
         map[profile.user_id] = profile;
       }
       setProfilesMap(map);
+    } else {
+      setProfilesMap({});
     }
 
-    if (result.data.length > 0) {
-      const currentStillExists =
-        selectedMatch && result.data.find((m) => m.id === selectedMatch.id);
+    let nextSelectedMatchId: string | null = null;
 
-      const matchToOpen = currentStillExists ?? result.data[0];
+    if (safeMatches.length > 0) {
+      const currentStillExists = selectedMatchId
+        ? safeMatches.some((m) => m.id === selectedMatchId)
+        : false;
 
-      setSelectedMatch(matchToOpen);
-      await loadMessages(matchToOpen.id, true);
+      nextSelectedMatchId = currentStillExists
+        ? selectedMatchId
+        : safeMatches[0].id;
+    }
+
+    setSelectedMatchId(nextSelectedMatchId);
+
+    if (nextSelectedMatchId) {
+      await loadMessages(nextSelectedMatchId, true);
     } else {
-      setSelectedMatch(null);
       setMessages([]);
     }
 
     setLoading(false);
-  };
-
-  useEffect(() => {
-    void loadMatches();
-  }, []);
+    hasLoadedOnceRef.current = true;
+  }, [user?.id, selectedMatchId]);
 
   useFocusEffect(
     useCallback(() => {
       void loadMatches();
-    }, [user?.id])
+    }, [loadMatches])
   );
 
   useEffect(() => {
-    if (!selectedMatch || !user) return;
+    if (!selectedMatchId || !user) return;
 
-    const unsubscribe = subscribeToMatchMessages(selectedMatch.id, () => {
-      void loadMessages(selectedMatch.id, true);
+    const unsubscribe = subscribeToMatchMessages(selectedMatchId, () => {
+      void loadMessages(selectedMatchId, true);
     });
 
     return unsubscribe;
-  }, [selectedMatch?.id, user?.id]);
+  }, [selectedMatchId, user?.id]);
 
   const onSelectMatch = async (match: Match) => {
-    setSelectedMatch(match);
+    setSelectedMatchId(match.id);
     await loadMessages(match.id, true);
   };
 
   const onSend = async () => {
     if (!user || !selectedMatch) return;
 
+    const text = draft.trim();
+    if (!text) return;
+
     setSending(true);
 
-    const result = await sendMessage(selectedMatch.id, user.id, draft);
+    const result = await sendMessage(selectedMatch.id, user.id, text);
 
     setSending(false);
 
@@ -161,7 +191,9 @@ export default function MessagesScreen() {
           style: 'destructive',
           onPress: async () => {
             setRemoving(true);
+
             const result = await unfriendMatch(selectedMatch.id);
+
             setRemoving(false);
 
             if (result.error) {
@@ -220,7 +252,7 @@ export default function MessagesScreen() {
         <RetroCard>
           <Text style={styles.emptyTitle}>No matches yet</Text>
           <Text style={styles.emptyText}>
-            Accept a connection request first to start chatting.
+            No active conversations are available.
           </Text>
         </RetroCard>
       ) : (
@@ -291,7 +323,6 @@ export default function MessagesScreen() {
             {selectedProfile ? (
               <View style={styles.profileHeader}>
                 <HeaderAvatar />
-
                 <View style={styles.profileHeaderBody}>
                   <Text style={styles.profileName}>
                     {selectedProfile.display_name || 'Unknown user'}
