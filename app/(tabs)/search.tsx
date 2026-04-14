@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,33 +21,53 @@ import {
   getRelationshipStatuses,
   sendConnectionRequest,
 } from '@/lib/requests';
-import { blockUser, getBlockedUserIds, reportUser } from '@/lib/safety';
 import { palette } from '@/lib/theme';
 import type { Match, Profile, RelationshipStatus } from '@/types';
+
+const GENDER_OPTIONS = ['Male', 'Female', 'Non-binary', 'Prefer not to say'];
+const LOOKING_FOR_OPTIONS = ['Friendship', 'Dating', 'Both'];
+const AGE_RANGES = [
+  { label: '18-24', min: 18, max: 24 },
+  { label: '25-30', min: 25, max: 30 },
+  { label: '31-40', min: 31, max: 40 },
+  { label: '41+', min: 41, max: 100 },
+];
+const CITY_CHIPS = ['Delhi', 'Mumbai', 'Bangalore', 'Kangra', 'Chandigarh'];
 
 export default function SearchScreen() {
   const { user } = useAuth();
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [city, setCity] = useState('');
-  const [gender, setGender] = useState('');
-  const [lookingFor, setLookingFor] = useState('');
+
+  const [cityInput, setCityInput] = useState('');
+  const [selectedCityChip, setSelectedCityChip] = useState<string | null>(null);
+  const [selectedGender, setSelectedGender] = useState<string>('');
+  const [selectedLookingFor, setSelectedLookingFor] = useState<string>('');
+  const [selectedAgeLabel, setSelectedAgeLabel] = useState<string>('');
+  const [minAge, setMinAge] = useState<number | undefined>(undefined);
+  const [maxAge, setMaxAge] = useState<number | undefined>(undefined);
+
   const [error, setError] = useState<string | null>(null);
   const [sendingTo, setSendingTo] = useState<string | null>(null);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
-  const [blockingUserId, setBlockingUserId] = useState<string | null>(null);
+
   const [relationshipMap, setRelationshipMap] = useState<
     Record<string, RelationshipStatus>
   >({});
   const [matchMap, setMatchMap] = useState<Record<string, Match>>({});
 
-  const loadProfiles = useCallback(async () => {
+  const resolvedCity = useMemo(() => {
+    const typed = cityInput.trim();
+    if (typed) return typed;
+    return selectedCityChip ?? '';
+  }, [cityInput, selectedCityChip]);
+
+  const loadProfiles = async () => {
     if (!user) {
       setProfiles([]);
       setRelationshipMap({});
       setMatchMap({});
-      setError(null);
       setLoading(false);
       return;
     }
@@ -55,17 +75,16 @@ export default function SearchScreen() {
     setLoading(true);
     setError(null);
 
-    const blockedResult = await getBlockedUserIds(user.id);
-    const blockedIds = blockedResult.data ?? [];
-
-    const discoverResult = await getDiscoverProfiles(user.id, {
-      city: city.trim() || undefined,
-      gender: gender.trim() || undefined,
-      looking_for: lookingFor.trim() || undefined,
+    const { data, error } = await getDiscoverProfiles(user.id, {
+      city: resolvedCity || undefined,
+      gender: selectedGender || undefined,
+      looking_for: selectedLookingFor || undefined,
+      min_age: minAge,
+      max_age: maxAge,
     });
 
-    if (discoverResult.error) {
-      setError(discoverResult.error);
+    if (error) {
+      setError(error);
       setProfiles([]);
       setRelationshipMap({});
       setMatchMap({});
@@ -73,18 +92,15 @@ export default function SearchScreen() {
       return;
     }
 
-    const filteredProfiles = discoverResult.data.filter(
-      (profile) => !blockedIds.includes(profile.user_id)
-    );
-
-    setProfiles(filteredProfiles);
+    setProfiles(data);
 
     const relationshipResult = await getRelationshipStatuses(
       user.id,
-      filteredProfiles.map((profile) => profile.user_id)
+      data.map((profile) => profile.user_id)
     );
 
     if (relationshipResult.error) {
+      console.log('relationship status error:', relationshipResult.error);
       setRelationshipMap({});
     } else {
       setRelationshipMap(relationshipResult.data);
@@ -95,8 +111,7 @@ export default function SearchScreen() {
     if (!matchesResult.error) {
       const map: Record<string, Match> = {};
       for (const match of matchesResult.data) {
-        const otherUserId =
-          match.user_a === user.id ? match.user_b : match.user_a;
+        const otherUserId = match.user_a === user.id ? match.user_b : match.user_a;
         map[otherUserId] = match;
       }
       setMatchMap(map);
@@ -105,12 +120,16 @@ export default function SearchScreen() {
     }
 
     setLoading(false);
-  }, [user, city, gender, lookingFor]);
+  };
+
+  useEffect(() => {
+    void loadProfiles();
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       void loadProfiles();
-    }, [loadProfiles])
+    }, [user?.id])
   );
 
   const getRelationshipLabel = (profileUserId: string) => {
@@ -124,11 +143,7 @@ export default function SearchScreen() {
       case 'friend':
         return { label: 'Mitra', disabled: true, isFriend: true };
       case 'incoming_request':
-        return {
-          label: 'Respond in Requests',
-          disabled: true,
-          isFriend: false,
-        };
+        return { label: 'Respond in Requests', disabled: true, isFriend: false };
       case 'outgoing_request':
         return { label: 'Request sent', disabled: true, isFriend: false };
       case 'declined_once':
@@ -147,7 +162,7 @@ export default function SearchScreen() {
 
     setSendingTo(profile.user_id);
 
-    const result = await sendConnectionRequest(
+    const { error } = await sendConnectionRequest(
       user.id,
       profile.user_id,
       `Hi ${profile.display_name || ''}, I’d like to connect on Mitrata.`
@@ -155,8 +170,8 @@ export default function SearchScreen() {
 
     setSendingTo(null);
 
-    if (result.error) {
-      Alert.alert('Could not send request', result.error);
+    if (error) {
+      Alert.alert('Could not send request', error);
       return;
     }
 
@@ -174,10 +189,7 @@ export default function SearchScreen() {
     const match = matchMap[profile.user_id];
 
     if (!match) {
-      Alert.alert(
-        'Not found',
-        'Could not find the friendship record for this user.'
-      );
+      Alert.alert('Not found', 'Could not find the friendship record for this user.');
       return;
     }
 
@@ -212,64 +224,43 @@ export default function SearchScreen() {
     );
   };
 
-  const onBlock = async (profile: Profile) => {
-    if (!user) return;
-
-    Alert.alert(
-      'Block user',
-      `Block ${profile.display_name || 'this user'}? They will disappear from your discover list and won’t be part of your space anymore.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Block',
-          style: 'destructive',
-          onPress: async () => {
-            setBlockingUserId(profile.user_id);
-
-            const result = await blockUser(
-              user.id,
-              profile.user_id,
-              'Blocked from discover'
-            );
-
-            setBlockingUserId(null);
-
-            if (result.error) {
-              Alert.alert('Could not block user', result.error);
-              return;
-            }
-
-            const existingMatch = matchMap[profile.user_id];
-            if (existingMatch) {
-              await unfriendMatch(existingMatch.id);
-            }
-
-            Alert.alert('Blocked', 'User has been blocked.');
-            await loadProfiles();
-          },
-        },
-      ]
-    );
+  const resetFilters = async () => {
+    setCityInput('');
+    setSelectedCityChip(null);
+    setSelectedGender('');
+    setSelectedLookingFor('');
+    setSelectedAgeLabel('');
+    setMinAge(undefined);
+    setMaxAge(undefined);
+    setTimeout(() => {
+      void loadProfiles();
+    }, 0);
   };
 
-  const onReport = async (profile: Profile) => {
-    if (!user) return;
-
-    const result = await reportUser(
-      user.id,
-      profile.user_id,
-      'User reported from discover',
-      `Reported profile: ${profile.display_name || 'Unknown user'}`
-    );
-
-    if (result.error) {
-      Alert.alert('Could not report user', result.error);
+  const pickAgeRange = (label: string, min: number, max: number) => {
+    if (selectedAgeLabel === label) {
+      setSelectedAgeLabel('');
+      setMinAge(undefined);
+      setMaxAge(undefined);
       return;
     }
 
-    Alert.alert(
-      'Reported',
-      'Thanks. This report has been recorded for review.'
+    setSelectedAgeLabel(label);
+    setMinAge(min);
+    setMaxAge(max);
+  };
+
+  const Avatar = ({ profile }: { profile: Profile }) => {
+    if (profile.avatar_url) {
+      return (
+        <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
+      );
+    }
+
+    return (
+      <View style={styles.avatarWrap}>
+        <Text style={styles.avatar}>✨</Text>
+      </View>
     );
   };
 
@@ -283,29 +274,93 @@ export default function SearchScreen() {
       <RetroCard>
         <Text style={styles.filterTitle}>Filters</Text>
 
-        <TextInput
-          style={styles.input}
-          placeholder="City"
-          placeholderTextColor={palette.subtext}
-          value={city}
-          onChangeText={setCity}
-        />
+        <Text style={styles.filterLabel}>Quick city picks</Text>
+        <View style={styles.chipWrap}>
+          {CITY_CHIPS.map((city) => {
+            const active = selectedCityChip === city && !cityInput.trim();
+            return (
+              <Pressable
+                key={city}
+                style={[styles.chip, active && styles.chipActive]}
+                onPress={() => {
+                  setCityInput('');
+                  setSelectedCityChip(active ? null : city);
+                }}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                  {city}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
         <TextInput
           style={styles.input}
-          placeholder="Gender"
+          placeholder="Or type a city"
           placeholderTextColor={palette.subtext}
-          value={gender}
-          onChangeText={setGender}
+          value={cityInput}
+          onChangeText={(text) => {
+            setCityInput(text);
+            if (text.trim()) {
+              setSelectedCityChip(null);
+            }
+          }}
         />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Looking for (friendship / dating / both)"
-          placeholderTextColor={palette.subtext}
-          value={lookingFor}
-          onChangeText={setLookingFor}
-        />
+        <Text style={styles.filterLabel}>Gender</Text>
+        <View style={styles.chipWrap}>
+          {GENDER_OPTIONS.map((option) => {
+            const active = selectedGender === option;
+            return (
+              <Pressable
+                key={option}
+                style={[styles.chip, active && styles.chipActive]}
+                onPress={() => setSelectedGender(active ? '' : option)}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                  {option}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Text style={styles.filterLabel}>Looking for</Text>
+        <View style={styles.chipWrap}>
+          {LOOKING_FOR_OPTIONS.map((option) => {
+            const active = selectedLookingFor === option;
+            return (
+              <Pressable
+                key={option}
+                style={[styles.chip, active && styles.chipActive]}
+                onPress={() => setSelectedLookingFor(active ? '' : option)}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                  {option}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Text style={styles.filterLabel}>Age range</Text>
+        <View style={styles.chipWrap}>
+          {AGE_RANGES.map((range) => {
+            const active = selectedAgeLabel === range.label;
+            return (
+              <Pressable
+                key={range.label}
+                style={[styles.chip, active && styles.chipActive]}
+                onPress={() => pickAgeRange(range.label, range.min, range.max)}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                  {range.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
         <View style={styles.actions}>
           <Pressable style={styles.button} onPress={() => void loadProfiles()}>
@@ -314,12 +369,7 @@ export default function SearchScreen() {
 
           <Pressable
             style={[styles.button, styles.secondaryButton]}
-            onPress={() => {
-              setCity('');
-              setGender('');
-              setLookingFor('');
-              setTimeout(() => void loadProfiles(), 0);
-            }}
+            onPress={() => void resetFilters()}
           >
             <Text style={[styles.buttonText, styles.secondaryButtonText]}>
               Reset
@@ -355,22 +405,20 @@ export default function SearchScreen() {
 
           return (
             <RetroCard key={profile.id} style={styles.profileCard}>
-              {profile.avatar_url ? (
-                <Image
-                  source={{ uri: profile.avatar_url }}
-                  style={styles.avatarImage}
-                />
-              ) : (
-                <View style={styles.avatarWrap}>
-                  <Text style={styles.avatar}>✨</Text>
-                </View>
-              )}
+              <Avatar profile={profile} />
 
               <View style={styles.profileMeta}>
-                <Text style={styles.name}>
-                  {profile.display_name || 'Mitrata User'}
-                  {profile.age ? `, ${profile.age}` : ''}
-                </Text>
+                <View style={styles.nameRow}>
+                  <Text style={styles.name}>
+                    {profile.display_name || 'Mitrata User'}
+                    {profile.age ? `, ${profile.age}` : ''}
+                  </Text>
+                  {profile.is_verified ? (
+                    <View style={styles.verifiedBadge}>
+                      <Text style={styles.verifiedBadgeText}>Verified</Text>
+                    </View>
+                  ) : null}
+                </View>
 
                 <Text style={styles.subline}>
                   {[profile.city, profile.country].filter(Boolean).join(', ') ||
@@ -416,9 +464,7 @@ export default function SearchScreen() {
                       relationUi.disabled && styles.connectButtonDisabled,
                     ]}
                     onPress={() => void onConnect(profile)}
-                    disabled={
-                      sendingTo === profile.user_id || relationUi.disabled
-                    }
+                    disabled={sendingTo === profile.user_id || relationUi.disabled}
                   >
                     <Text style={styles.connectButtonText}>
                       {sendingTo === profile.user_id
@@ -427,31 +473,6 @@ export default function SearchScreen() {
                     </Text>
                   </Pressable>
                 )}
-
-                <View style={styles.safetyRow}>
-                  <Pressable
-                    style={[
-                      styles.safetyButton,
-                      blockingUserId === profile.user_id &&
-                        styles.safetyButtonDisabled,
-                    ]}
-                    onPress={() => void onBlock(profile)}
-                    disabled={blockingUserId === profile.user_id}
-                  >
-                    <Text style={styles.safetyButtonText}>
-                      {blockingUserId === profile.user_id
-                        ? 'Blocking...'
-                        : 'Block'}
-                    </Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={[styles.safetyButton, styles.reportButton]}
-                    onPress={() => void onReport(profile)}
-                  >
-                    <Text style={styles.reportButtonText}>Report</Text>
-                  </Pressable>
-                </View>
               </View>
             </RetroCard>
           );
@@ -470,6 +491,12 @@ const styles = StyleSheet.create({
     color: palette.text,
     marginBottom: 10,
   },
+  filterLabel: {
+    color: palette.text,
+    fontWeight: '700',
+    marginBottom: 8,
+    marginTop: 2,
+  },
   input: {
     backgroundColor: palette.surface,
     borderWidth: 1,
@@ -477,8 +504,30 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 14,
-    marginBottom: 10,
+    marginBottom: 12,
     color: palette.text,
+  },
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  chip: {
+    backgroundColor: palette.surfaceStrong,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  chipActive: {
+    backgroundColor: palette.accentDeep,
+  },
+  chipText: {
+    color: palette.text,
+    fontWeight: '700',
+  },
+  chipTextActive: {
+    color: '#fff',
   },
   actions: { flexDirection: 'row', gap: 10, marginTop: 4 },
   button: {
@@ -530,7 +579,24 @@ const styles = StyleSheet.create({
   },
   avatar: { fontSize: 24 },
   profileMeta: { flex: 1, gap: 6 },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
   name: { fontSize: 18, fontWeight: '800', color: palette.text },
+  verifiedBadge: {
+    backgroundColor: palette.accentDeep,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  verifiedBadgeText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12,
+  },
   subline: { color: palette.subtext },
   bio: { color: palette.text, lineHeight: 21, marginTop: 4 },
   connectButton: {
@@ -571,31 +637,6 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   unfriendButtonText: {
-    color: palette.white,
-    fontWeight: '700',
-  },
-  safetyRow: {
-    marginTop: 8,
-    flexDirection: 'row',
-    gap: 8,
-  },
-  safetyButton: {
-    backgroundColor: palette.surfaceStrong,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  reportButton: {
-    backgroundColor: palette.danger,
-  },
-  safetyButtonDisabled: {
-    opacity: 0.7,
-  },
-  safetyButtonText: {
-    color: palette.text,
-    fontWeight: '700',
-  },
-  reportButtonText: {
     color: palette.white,
     fontWeight: '700',
   },
