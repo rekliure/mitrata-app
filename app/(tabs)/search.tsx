@@ -34,6 +34,26 @@ const AGE_RANGES = [
 ];
 const CITY_CHIPS = ['Delhi', 'Mumbai', 'Bangalore', 'Kangra', 'Chandigarh'];
 
+function sortProfilesForTrust(profiles: Profile[]) {
+  return [...profiles].sort((a, b) => {
+    const verifiedScoreA = a.is_verified ? 1 : 0;
+    const verifiedScoreB = b.is_verified ? 1 : 0;
+    if (verifiedScoreA !== verifiedScoreB) return verifiedScoreB - verifiedScoreA;
+
+    const bioScoreA = a.bio ? 1 : 0;
+    const bioScoreB = b.bio ? 1 : 0;
+    if (bioScoreA !== bioScoreB) return bioScoreB - bioScoreA;
+
+    const avatarScoreA = a.avatar_url ? 1 : 0;
+    const avatarScoreB = b.avatar_url ? 1 : 0;
+    if (avatarScoreA !== avatarScoreB) return avatarScoreB - avatarScoreA;
+
+    const updatedA = new Date(a.updated_at).getTime();
+    const updatedB = new Date(b.updated_at).getTime();
+    return updatedB - updatedA;
+  });
+}
+
 export default function SearchScreen() {
   const { user } = useAuth();
 
@@ -92,11 +112,12 @@ export default function SearchScreen() {
       return;
     }
 
-    setProfiles(data);
+    const sortedProfiles = sortProfilesForTrust(data);
+    setProfiles(sortedProfiles);
 
     const relationshipResult = await getRelationshipStatuses(
       user.id,
-      data.map((profile) => profile.user_id)
+      sortedProfiles.map((profile) => profile.user_id)
     );
 
     if (relationshipResult.error) {
@@ -413,6 +434,7 @@ export default function SearchScreen() {
                     {profile.display_name || 'Mitrata User'}
                     {profile.age ? `, ${profile.age}` : ''}
                   </Text>
+
                   {profile.is_verified ? (
                     <View style={styles.verifiedBadge}>
                       <Text style={styles.verifiedBadgeText}>Verified</Text>

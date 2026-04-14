@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import type { DimensionValue } from 'react-native';
 import {
   Alert,
   Image,
@@ -14,7 +15,10 @@ import { useAuth } from '@/context/AuthContext';
 import { RetroCard } from '@/components/RetroCard';
 import { SectionTitle } from '@/components/SectionTitle';
 import { pickAvatarImage, uploadAvatar } from '@/lib/avatar';
-import { updateMyProfile } from '@/lib/profile';
+import {
+  calculateProfileCompleteness,
+  updateMyProfile,
+} from '@/lib/profile';
 import { getMyBlockedProfiles, unblockUser } from '@/lib/safety';
 import { palette } from '@/lib/theme';
 import type { Profile } from '@/types';
@@ -32,6 +36,8 @@ export default function ProfileScreen() {
   const [country, setCountry] = useState('');
   const [lookingFor, setLookingFor] = useState('');
   const [bio, setBio] = useState('');
+  const [isVisible, setIsVisible] = useState(true);
+
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [blockedProfiles, setBlockedProfiles] = useState<Profile[]>([]);
@@ -45,7 +51,25 @@ export default function ProfileScreen() {
     setCountry(profile?.country ?? '');
     setLookingFor(profile?.looking_for ?? '');
     setBio(profile?.bio ?? '');
+    setIsVisible(profile?.is_visible ?? true);
   }, [profile]);
+
+  const completeness = useMemo(
+    () =>
+      calculateProfileCompleteness({
+        ...profile,
+        display_name: displayName,
+        age: age.trim() ? Number(age) : null,
+        gender,
+        city,
+        country,
+        looking_for: lookingFor,
+        bio,
+      }),
+    [profile, displayName, age, gender, city, country, lookingFor, bio]
+  );
+
+  const progressWidth: DimensionValue = `${Math.max(8, completeness)}%`;
 
   const loadBlockedProfiles = useCallback(async () => {
     if (!user) {
@@ -113,6 +137,7 @@ export default function ProfileScreen() {
       country: cleanCountry || null,
       looking_for: lookingFor,
       bio: cleanBio || null,
+      is_visible: isVisible,
     });
 
     setSaving(false);
@@ -211,6 +236,7 @@ export default function ProfileScreen() {
     setCountry(profile?.country ?? '');
     setLookingFor(profile?.looking_for ?? '');
     setBio(profile?.bio ?? '');
+    setIsVisible(profile?.is_visible ?? true);
     Alert.alert('Reset', 'Unsaved edits have been restored to saved values.');
   };
 
@@ -260,8 +286,32 @@ export default function ProfileScreen() {
           </Text>
         </Pressable>
 
-        <Text style={styles.name}>{displayTitle}</Text>
+        <View style={styles.nameRow}>
+          <Text style={styles.name}>{displayTitle}</Text>
+          {profile?.is_verified ? (
+            <View style={styles.verifiedBadge}>
+              <Text style={styles.verifiedBadgeText}>Verified</Text>
+            </View>
+          ) : null}
+        </View>
+
         <Text style={styles.email}>{user?.email ?? 'No email found'}</Text>
+      </RetroCard>
+
+      <RetroCard>
+        <Text style={styles.heading}>Trust score</Text>
+
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: progressWidth }]} />
+        </View>
+
+        <Text style={styles.progressText}>
+          Profile completeness: {completeness}%
+        </Text>
+
+        <Text style={styles.helperText}>
+          Add photo, bio, city, age, and clear intent to improve trust.
+        </Text>
       </RetroCard>
 
       <RetroCard>
@@ -355,6 +405,32 @@ export default function ProfileScreen() {
           multiline
         />
 
+        <View style={styles.visibilityCard}>
+          <Text style={styles.visibilityTitle}>Profile visibility</Text>
+          <Text style={styles.visibilitySub}>
+            {isVisible
+              ? 'Your profile can appear in Discover.'
+              : 'Your profile is hidden from Discover.'}
+          </Text>
+
+          <Pressable
+            style={[
+              styles.visibilityButton,
+              isVisible && styles.visibilityButtonActive,
+            ]}
+            onPress={() => setIsVisible((prev) => !prev)}
+          >
+            <Text
+              style={[
+                styles.visibilityButtonText,
+                isVisible && styles.visibilityButtonTextActive,
+              ]}
+            >
+              {isVisible ? 'Visible' : 'Hidden'}
+            </Text>
+          </Pressable>
+        </View>
+
         <Pressable style={styles.saveButton} onPress={handleSave} disabled={saving}>
           <Text style={styles.saveButtonText}>
             {saving ? 'Saving...' : 'Save profile'}
@@ -388,7 +464,10 @@ export default function ProfileScreen() {
                       {blockedProfile.display_name || 'Unknown user'}
                     </Text>
                     <Text style={styles.blockedSubline}>
-                      {[blockedProfile.age ? `${blockedProfile.age}` : null, blockedProfile.city]
+                      {[
+                        blockedProfile.age ? `${blockedProfile.age}` : null,
+                        blockedProfile.city,
+                      ]
                         .filter(Boolean)
                         .join(' • ') || 'Profile details unavailable'}
                     </Text>
@@ -477,13 +556,52 @@ const styles = StyleSheet.create({
     color: palette.text,
     fontWeight: '700',
   },
+  nameRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
   name: { fontSize: 22, fontWeight: '800', color: palette.text },
+  verifiedBadge: {
+    backgroundColor: palette.accentDeep,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  verifiedBadgeText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12,
+  },
   email: { color: palette.subtext },
   heading: {
     fontSize: 18,
     fontWeight: '700',
     color: palette.text,
     marginBottom: 10,
+  },
+  progressTrack: {
+    width: '100%',
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: palette.surfaceStrong,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: palette.accentDeep,
+  },
+  progressText: {
+    color: palette.text,
+    fontWeight: '700',
+    marginTop: 10,
+  },
+  helperText: {
+    color: palette.subtext,
+    marginTop: 6,
+    lineHeight: 20,
   },
   label: {
     fontSize: 14,
@@ -526,6 +644,41 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   choiceChipTextActive: {
+    color: '#fff',
+  },
+  visibilityCard: {
+    marginTop: 4,
+    marginBottom: 14,
+    backgroundColor: palette.surfaceStrong,
+    borderRadius: 14,
+    padding: 14,
+  },
+  visibilityTitle: {
+    color: palette.text,
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  visibilitySub: {
+    color: palette.subtext,
+    marginTop: 4,
+    lineHeight: 20,
+  },
+  visibilityButton: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    backgroundColor: palette.surface,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  visibilityButtonActive: {
+    backgroundColor: palette.accentDeep,
+  },
+  visibilityButtonText: {
+    color: palette.text,
+    fontWeight: '700',
+  },
+  visibilityButtonTextActive: {
     color: '#fff',
   },
   saveButton: {
