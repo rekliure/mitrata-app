@@ -55,12 +55,9 @@ export async function sendMessage(
 }
 
 export async function markMessagesAsRead(matchId: string, currentUserId: string) {
-  const { error } = await supabase
-    .from('messages')
-    .update({ read_at: new Date().toISOString() })
-    .eq('match_id', matchId)
-    .neq('sender_user_id', currentUserId)
-    .is('read_at', null);
+  const { error } = await supabase.rpc('mark_match_messages_read', {
+    p_match_id: matchId,
+  });
 
   return {
     error: error?.message ?? null,

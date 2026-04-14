@@ -1,14 +1,17 @@
-import { Redirect, Tabs, useFocusEffect } from 'expo-router';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { Redirect, Tabs, usePathname } from 'expo-router';
+import { ActivityIndicator, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { getUnreadMessageCount } from '@/lib/messages';
 import { getPendingRequestCount } from '@/lib/requests';
+import { supabase } from '@/lib/supabase';
 import { palette } from '@/lib/theme';
 
 export default function TabsLayout() {
   const { user, profile, loading } = useAuth();
+  const pathname = usePathname();
+
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [pendingRequests, setPendingRequests] = useState(0);
 
@@ -24,11 +27,40 @@ export default function TabsLayout() {
     setPendingRequests(requestsResult.count);
   };
 
-  useFocusEffect(
-    useCallback(() => {
-      void loadBadges();
-    }, [user?.id])
-  );
+  useEffect(() => {
+    void loadBadges();
+  }, [user?.id, pathname]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const messagesChannel = supabase
+      .channel(`tab-badges-messages-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'messages' },
+        () => {
+          void loadBadges();
+        }
+      )
+      .subscribe();
+
+    const requestsChannel = supabase
+      .channel(`tab-badges-requests-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'connection_requests' },
+        () => {
+          void loadBadges();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(messagesChannel);
+      supabase.removeChannel(requestsChannel);
+    };
+  }, [user?.id]);
 
   if (loading) {
     return (

@@ -94,3 +94,18 @@ export type Message = {
   created_at: string;
   read_at: string | null;
 };
+
+export type RelationshipState =
+  | 'friend'
+  | 'incoming_request'
+  | 'outgoing_request'
+  | 'not_friend'
+  | 'declined_once'
+  | 'declined_twice'
+  | 'declined_limit_reached';
+
+export type RelationshipStatus = {
+  user_id: string;
+  state: RelationshipState;
+  declineCount: number;
+};

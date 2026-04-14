@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -104,6 +105,18 @@ export default function RequestsScreen() {
   const incomingCount = useMemo(() => incoming.length, [incoming]);
   const outgoingCount = useMemo(() => outgoing.length, [outgoing]);
 
+  const Avatar = ({ profile }: { profile?: Profile }) => {
+    if (profile?.avatar_url) {
+      return <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />;
+    }
+
+    return (
+      <View style={styles.avatarWrap}>
+        <Text style={styles.avatarText}>✨</Text>
+      </View>
+    );
+  };
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <SectionTitle
@@ -130,17 +143,26 @@ export default function RequestsScreen() {
             ) : (
               incoming.map((request) => {
                 const sender = profilesMap[request.sender_user_id];
+
                 return (
                   <View key={request.id} style={styles.requestItem}>
-                    <Text style={styles.requestName}>
-                      {sender?.display_name || 'Unknown user'}
-                    </Text>
-                    <Text style={styles.requestMeta}>
-                      {[sender?.age ? `${sender.age}` : null, sender?.city].filter(Boolean).join(' • ') || 'Profile details unavailable'}
-                    </Text>
-                    <Text style={styles.requestMessage}>
-                      {request.intro_message || 'No intro message'}
-                    </Text>
+                    <View style={styles.requestTop}>
+                      <Avatar profile={sender} />
+
+                      <View style={styles.requestBody}>
+                        <Text style={styles.requestName}>
+                          {sender?.display_name || 'Unknown user'}
+                        </Text>
+                        <Text style={styles.requestMeta}>
+                          {[sender?.age ? `${sender.age}` : null, sender?.city]
+                            .filter(Boolean)
+                            .join(' • ') || 'Profile details unavailable'}
+                        </Text>
+                        <Text style={styles.requestMessage}>
+                          {request.intro_message || 'No intro message'}
+                        </Text>
+                      </View>
+                    </View>
 
                     <View style={styles.row}>
                       <Pressable
@@ -170,18 +192,27 @@ export default function RequestsScreen() {
             ) : (
               outgoing.map((request) => {
                 const receiver = profilesMap[request.receiver_user_id];
+
                 return (
                   <View key={request.id} style={styles.requestItem}>
-                    <Text style={styles.requestName}>
-                      {receiver?.display_name || 'Unknown user'}
-                    </Text>
-                    <Text style={styles.requestMeta}>
-                      {[receiver?.age ? `${receiver.age}` : null, receiver?.city].filter(Boolean).join(' • ') || 'Profile details unavailable'}
-                    </Text>
-                    <Text style={styles.requestMessage}>
-                      {request.intro_message || 'No intro message'}
-                    </Text>
-                    <Text style={styles.pending}>Pending</Text>
+                    <View style={styles.requestTop}>
+                      <Avatar profile={receiver} />
+
+                      <View style={styles.requestBody}>
+                        <Text style={styles.requestName}>
+                          {receiver?.display_name || 'Unknown user'}
+                        </Text>
+                        <Text style={styles.requestMeta}>
+                          {[receiver?.age ? `${receiver.age}` : null, receiver?.city]
+                            .filter(Boolean)
+                            .join(' • ') || 'Profile details unavailable'}
+                        </Text>
+                        <Text style={styles.requestMessage}>
+                          {request.intro_message || 'No intro message'}
+                        </Text>
+                        <Text style={styles.pending}>Pending</Text>
+                      </View>
+                    </View>
                   </View>
                 );
               })
@@ -205,12 +236,37 @@ const styles = StyleSheet.create({
     borderTopColor: palette.border,
     paddingTop: 12,
     marginTop: 12,
-    gap: 6,
+    gap: 10,
+  },
+  requestTop: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  requestBody: {
+    flex: 1,
+    gap: 4,
+  },
+  avatarWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: palette.surfaceStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarImage: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+  },
+  avatarText: {
+    fontSize: 22,
   },
   requestName: { color: palette.text, fontWeight: '800', fontSize: 18 },
   requestMeta: { color: palette.subtext },
   requestMessage: { color: palette.text, lineHeight: 20 },
-  row: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  row: { flexDirection: 'row', gap: 10, marginTop: 4 },
   acceptBtn: {
     backgroundColor: palette.accentDeep,
     borderRadius: 10,
