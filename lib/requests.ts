@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
-import type { ConnectionRequest, Match } from '@/types';
+import type { ConnectionRequest, Match, RelationshipStatus } from '@/types';
+import { getBlockedRelationships } from '@/lib/social';
 
 export async function sendConnectionRequest(
   senderUserId: string,
@@ -10,7 +11,14 @@ export async function sendConnectionRequest(
     return { data: null, error: 'You cannot connect with yourself.' };
   }
 
-  const relationshipResult = await getRelationshipStatuses(senderUserId, [receiverUserId]);
+  const blockedResult = await getBlockedRelationships(senderUserId);
+  if ((blockedResult.data ?? []).includes(receiverUserId)) {
+    return { data: null, error: 'You cannot send a request to this user.' };
+  }
+
+  const relationshipResult = await getRelationshipStatuses(senderUserId, [
+    receiverUserId,
+  ]);
 
   if (relationshipResult.error) {
     return { data: null, error: relationshipResult.error };
@@ -23,7 +31,10 @@ export async function sendConnectionRequest(
   }
 
   if (relation.state === 'incoming_request') {
-    return { data: null, error: 'This user already sent you a request. Please respond from Requests.' };
+    return {
+      data: null,
+      error: 'This user already sent you a request. Please respond from Requests.',
+    };
   }
 
   if (relation.state === 'outgoing_request') {
@@ -137,19 +148,32 @@ export async function createMatch(userA: string, userB: string) {
 }
 
 export async function getPendingRequestCount(userId: string) {
+  const blockedResult = await getBlockedRelationships(userId);
+  const blockedIds = new Set(blockedResult.data ?? []);
+
   const { data, error } = await supabase
     .from('connection_requests')
     .select('*')
     .eq('receiver_user_id', userId)
     .eq('status', 'pending');
 
+  if (error) {
+    return {
+      count: 0,
+      error: error.message,
+    };
+  }
+
+  const safeCount =
+    (data as ConnectionRequest[] | null)?.filter(
+      (row) => !blockedIds.has(row.sender_user_id)
+    ).length ?? 0;
+
   return {
-    count: data?.length ?? 0,
-    error: error?.message ?? null,
+    count: safeCount,
+    error: null,
   };
 }
-
-import type { RelationshipStatus } from '@/types';
 
 export async function getRelationshipStatuses(
   currentUserId: string,
@@ -170,12 +194,24 @@ export async function getRelationshipStatuses(
     return { data: resultMap, error: null };
   }
 
+  const blockedResult = await getBlockedRelationships(currentUserId);
+  const blockedIds = new Set(blockedResult.data ?? []);
+
+  const allowedIds = uniqueIds.filter((id) => !blockedIds.has(id));
+
+  if (allowedIds.length === 0) {
+    return { data: resultMap, error: null };
+  }
+
   const { data: matches, error: matchError } = await supabase
     .from('matches')
     .select('*')
     .or(
-      uniqueIds
-        .flatMap((id) => [`and(user_a.eq.${currentUserId},user_b.eq.${id})`, `and(user_a.eq.${id},user_b.eq.${currentUserId})`])
+      allowedIds
+        .flatMap((id) => [
+          `and(user_a.eq.${currentUserId},user_b.eq.${id})`,
+          `and(user_a.eq.${id},user_b.eq.${currentUserId})`,
+        ])
         .join(',')
     );
 
@@ -196,14 +232,17 @@ export async function getRelationshipStatuses(
     .select('*')
     .eq('sender_user_id', currentUserId)
     .eq('status', 'pending')
-    .in('receiver_user_id', uniqueIds);
+    .in('receiver_user_id', allowedIds);
 
   if (outgoingError) {
     return { data: resultMap, error: outgoingError.message };
   }
 
   for (const row of outgoingPending ?? []) {
-    if (resultMap[row.receiver_user_id] && resultMap[row.receiver_user_id].state !== 'friend') {
+    if (
+      resultMap[row.receiver_user_id] &&
+      resultMap[row.receiver_user_id].state !== 'friend'
+    ) {
       resultMap[row.receiver_user_id].state = 'outgoing_request';
     }
   }
@@ -213,14 +252,17 @@ export async function getRelationshipStatuses(
     .select('*')
     .eq('receiver_user_id', currentUserId)
     .eq('status', 'pending')
-    .in('sender_user_id', uniqueIds);
+    .in('sender_user_id', allowedIds);
 
   if (incomingError) {
     return { data: resultMap, error: incomingError.message };
   }
 
   for (const row of incomingPending ?? []) {
-    if (resultMap[row.sender_user_id] && resultMap[row.sender_user_id].state !== 'friend') {
+    if (
+      resultMap[row.sender_user_id] &&
+      resultMap[row.sender_user_id].state !== 'friend'
+    ) {
       resultMap[row.sender_user_id].state = 'incoming_request';
     }
   }
@@ -230,7 +272,7 @@ export async function getRelationshipStatuses(
     .select('receiver_user_id')
     .eq('sender_user_id', currentUserId)
     .eq('status', 'declined')
-    .in('receiver_user_id', uniqueIds);
+    .in('receiver_user_id', allowedIds);
 
   if (declinedError) {
     return { data: resultMap, error: declinedError.message };
@@ -241,7 +283,7 @@ export async function getRelationshipStatuses(
     counts[row.receiver_user_id] = (counts[row.receiver_user_id] ?? 0) + 1;
   }
 
-  for (const userId of uniqueIds) {
+  for (const userId of allowedIds) {
     if (resultMap[userId].state === 'friend') continue;
     if (resultMap[userId].state === 'incoming_request') continue;
     if (resultMap[userId].state === 'outgoing_request') continue;
