@@ -1,52 +1,41 @@
 import { supabase } from '@/lib/supabase';
 import type { Profile } from '@/types';
 
-export type DiscoverFilters = {
-  gender?: string;
+type DiscoverFilters = {
   city?: string;
+  gender?: string;
   looking_for?: string;
-  minAge?: number;
-  maxAge?: number;
 };
 
 export async function getDiscoverProfiles(
   currentUserId: string,
-  filters?: DiscoverFilters
+  filters: DiscoverFilters = {}
 ) {
   let query = supabase
     .from('profiles')
     .select('*')
-    .eq('is_profile_complete', true)
-    .eq('is_visible', true)
     .neq('user_id', currentUserId)
-    .order('created_at', { ascending: false });
+    .eq('is_visible', true)
+    .eq('is_profile_complete', true)
+    .order('updated_at', { ascending: false });
 
-  if (filters?.gender?.trim()) {
-    query = query.ilike('gender', filters.gender.trim());
+  const city = filters.city?.trim();
+  const gender = filters.gender?.trim();
+  const lookingFor = filters.looking_for?.trim();
+
+  if (city) {
+    query = query.ilike('city', `%${city}%`);
   }
 
-  if (filters?.city?.trim()) {
-    query = query.ilike('city', `%${filters.city.trim()}%`);
+  if (gender) {
+    query = query.ilike('gender', gender);
   }
 
-  if (filters?.looking_for?.trim()) {
-    query = query.ilike('looking_for', filters.looking_for.trim());
-  }
-
-  if (typeof filters?.minAge === 'number') {
-    query = query.gte('age', filters.minAge);
-  }
-
-  if (typeof filters?.maxAge === 'number') {
-    query = query.lte('age', filters.maxAge);
+  if (lookingFor) {
+    query = query.ilike('looking_for', lookingFor);
   }
 
   const { data, error } = await query;
-
-  console.log('DISCOVER currentUserId:', currentUserId);
-  console.log('DISCOVER filters:', filters);
-  console.log('DISCOVER data:', data);
-  console.log('DISCOVER error:', error);
 
   return {
     data: (data as Profile[]) ?? [],

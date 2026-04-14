@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -41,14 +41,13 @@ export default function SearchScreen() {
     Record<string, RelationshipStatus>
   >({});
   const [matchMap, setMatchMap] = useState<Record<string, Match>>({});
-  const [blockedIds, setBlockedIds] = useState<string[]>([]);
 
-  const loadProfiles = async () => {
+  const loadProfiles = useCallback(async () => {
     if (!user) {
       setProfiles([]);
       setRelationshipMap({});
       setMatchMap({});
-      setBlockedIds([]);
+      setError(null);
       setLoading(false);
       return;
     }
@@ -57,8 +56,7 @@ export default function SearchScreen() {
     setError(null);
 
     const blockedResult = await getBlockedUserIds(user.id);
-    const blocked = blockedResult.data ?? [];
-    setBlockedIds(blocked);
+    const blockedIds = blockedResult.data ?? [];
 
     const discoverResult = await getDiscoverProfiles(user.id, {
       city: city.trim() || undefined,
@@ -76,7 +74,7 @@ export default function SearchScreen() {
     }
 
     const filteredProfiles = discoverResult.data.filter(
-      (profile) => !blocked.includes(profile.user_id)
+      (profile) => !blockedIds.includes(profile.user_id)
     );
 
     setProfiles(filteredProfiles);
@@ -87,13 +85,13 @@ export default function SearchScreen() {
     );
 
     if (relationshipResult.error) {
-      console.log('relationship status error:', relationshipResult.error);
       setRelationshipMap({});
     } else {
       setRelationshipMap(relationshipResult.data);
     }
 
     const matchesResult = await getMyMatches(user.id);
+
     if (!matchesResult.error) {
       const map: Record<string, Match> = {};
       for (const match of matchesResult.data) {
@@ -107,16 +105,12 @@ export default function SearchScreen() {
     }
 
     setLoading(false);
-  };
-
-  useEffect(() => {
-    void loadProfiles();
-  }, []);
+  }, [user, city, gender, lookingFor]);
 
   useFocusEffect(
     useCallback(() => {
       void loadProfiles();
-    }, [user?.id])
+    }, [loadProfiles])
   );
 
   const getRelationshipLabel = (profileUserId: string) => {
@@ -455,7 +449,7 @@ export default function SearchScreen() {
                     style={[styles.safetyButton, styles.reportButton]}
                     onPress={() => void onReport(profile)}
                   >
-                    <Text style={styles.safetyButtonText}>Report</Text>
+                    <Text style={styles.reportButtonText}>Report</Text>
                   </Pressable>
                 </View>
               </View>
@@ -599,6 +593,10 @@ const styles = StyleSheet.create({
   },
   safetyButtonText: {
     color: palette.text,
+    fontWeight: '700',
+  },
+  reportButtonText: {
+    color: palette.white,
     fontWeight: '700',
   },
 });
