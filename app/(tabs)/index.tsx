@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -14,7 +15,12 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { useAuth } from '@/context/AuthContext';
 import { getRecentMitras } from '@/lib/home';
 import { getUnreadMessageCount } from '@/lib/messages';
-import { getFeedPosts } from '@/lib/posts';
+import {
+  deletePost,
+  getFeedPosts,
+  likePost,
+  unlikePost,
+} from '@/lib/posts';
 import { getPendingRequestCount } from '@/lib/requests';
 import { palette } from '@/lib/theme';
 import type { FeedPost, Match, Profile } from '@/types';
@@ -24,6 +30,8 @@ type RecentMitraItem = {
   profile: Profile | null;
 };
 
+type FeedFilter = 'all' | 'public' | 'mine';
+
 export default function HomeScreen() {
   const { user, profile } = useAuth();
 
@@ -32,6 +40,8 @@ export default function HomeScreen() {
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [recentMitras, setRecentMitras] = useState<RecentMitraItem[]>([]);
   const [feedPosts, setFeedPosts] = useState<FeedPost[]>([]);
+  const [feedFilter, setFeedFilter] = useState<FeedFilter>('all');
+  const [busyPostId, setBusyPostId] = useState<string | null>(null);
 
   const loadHome = async () => {
     if (!user) return;
@@ -43,7 +53,7 @@ export default function HomeScreen() {
         getPendingRequestCount(user.id),
         getUnreadMessageCount(user.id),
         getRecentMitras(user.id, 5),
-        getFeedPosts(user.id, 12),
+        getFeedPosts(user.id, 20),
       ]);
 
     setPendingRequests(requestsResult.count);
@@ -101,8 +111,70 @@ export default function HomeScreen() {
     );
   };
 
+  const filteredFeed = useMemo(() => {
+    if (!user) return feedPosts;
+
+    switch (feedFilter) {
+      case 'public':
+        return feedPosts.filter((item) => item.post.visibility === 'public');
+      case 'mine':
+        return feedPosts.filter((item) => item.post.user_id === user.id);
+      default:
+        return feedPosts;
+    }
+  }, [feedPosts, feedFilter, user?.id]);
+
   const formatVisibility = (value: string) =>
     value === 'mitras_only' ? 'Mitras only' : 'Public';
+
+  const handleLikeToggle = async (item: FeedPost) => {
+    if (!user) return;
+
+    setBusyPostId(item.post.id);
+
+    const result = item.liked_by_me
+      ? await unlikePost(item.post.id, user.id)
+      : await likePost(item.post.id, user.id);
+
+    setBusyPostId(null);
+
+    if (result.error) {
+      Alert.alert('Could not update like', result.error);
+      return;
+    }
+
+    await loadHome();
+  };
+
+  const handleDeletePost = async (item: FeedPost) => {
+    if (!user) return;
+
+    Alert.alert(
+      'Delete post',
+      'Are you sure you want to delete this post?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setBusyPostId(item.post.id);
+
+            const result = await deletePost(item.post.id, user.id);
+
+            setBusyPostId(null);
+
+            if (result.error) {
+              Alert.alert('Could not delete post', result.error);
+              return;
+            }
+
+            await loadHome();
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -225,38 +297,95 @@ export default function HomeScreen() {
               </Pressable>
             </View>
 
-            {feedPosts.length === 0 ? (
+            <View style={styles.filterRow}>
+              {(['all', 'public', 'mine'] as FeedFilter[]).map((option) => {
+                const active = feedFilter === option;
+                const label =
+                  option === 'all'
+                    ? 'All'
+                    : option === 'public'
+                    ? 'Public'
+                    : 'My posts';
+
+                return (
+                  <Pressable
+                    key={option}
+                    style={[styles.filterChip, active && styles.filterChipActive]}
+                    onPress={() => setFeedFilter(option)}
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        active && styles.filterChipTextActive,
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {filteredFeed.length === 0 ? (
               <Text style={styles.emptyText}>
-                No posts yet. Be the first one to say something meaningful.
+                No posts found for this filter.
               </Text>
             ) : (
               <View style={styles.feedList}>
-                {feedPosts.map(({ post, profile: postProfile }) => (
-                  <View key={post.id} style={styles.feedCard}>
+                {filteredFeed.map((item) => (
+                  <View key={item.post.id} style={styles.feedCard}>
                     <View style={styles.feedTop}>
                       <Avatar
-                        avatarUrl={postProfile?.avatar_url}
+                        avatarUrl={item.profile?.avatar_url}
                         emoji="✨"
                         size={42}
                       />
 
                       <View style={styles.feedMetaWrap}>
                         <Text style={styles.feedName}>
-                          {postProfile?.display_name || 'Unknown user'}
+                          {item.profile?.display_name || 'Unknown user'}
                         </Text>
                         <Text style={styles.feedMeta}>
-                          {[postProfile?.city, formatVisibility(post.visibility)]
+                          {[item.profile?.city, formatVisibility(item.post.visibility)]
                             .filter(Boolean)
                             .join(' • ')}
                         </Text>
                       </View>
                     </View>
 
-                    {post.mood ? (
-                      <Text style={styles.feedMood}>Mood: {post.mood}</Text>
+                    {item.post.mood ? (
+                      <Text style={styles.feedMood}>Mood: {item.post.mood}</Text>
                     ) : null}
 
-                    <Text style={styles.feedContent}>{post.content}</Text>
+                    <Text style={styles.feedContent}>{item.post.content}</Text>
+
+                    <View style={styles.feedActions}>
+                      <Pressable
+                        style={[
+                          styles.feedActionButton,
+                          busyPostId === item.post.id && styles.feedActionButtonDisabled,
+                        ]}
+                        onPress={() => void handleLikeToggle(item)}
+                        disabled={busyPostId === item.post.id}
+                      >
+                        <Text style={styles.feedActionButtonText}>
+                          {item.liked_by_me ? 'Unlike' : 'Like'} ({item.like_count})
+                        </Text>
+                      </Pressable>
+
+                      {item.post.user_id === user?.id ? (
+                        <Pressable
+                          style={[
+                            styles.deleteActionButton,
+                            busyPostId === item.post.id && styles.feedActionButtonDisabled,
+                          ]}
+                          onPress={() => void handleDeletePost(item)}
+                          disabled={busyPostId === item.post.id}
+                        >
+                          <Text style={styles.deleteActionButtonText}>Delete</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
                   </View>
                 ))}
               </View>
@@ -395,6 +524,28 @@ const styles = StyleSheet.create({
     color: palette.accentDeep,
     fontWeight: '800',
   },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+    flexWrap: 'wrap',
+  },
+  filterChip: {
+    backgroundColor: palette.surfaceStrong,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  filterChipActive: {
+    backgroundColor: palette.accentDeep,
+  },
+  filterChipText: {
+    color: palette.text,
+    fontWeight: '700',
+  },
+  filterChipTextActive: {
+    color: '#fff',
+  },
   feedList: {
     gap: 12,
   },
@@ -428,6 +579,34 @@ const styles = StyleSheet.create({
   feedContent: {
     color: palette.text,
     lineHeight: 22,
+  },
+  feedActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  feedActionButton: {
+    backgroundColor: palette.blush,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  feedActionButtonDisabled: {
+    opacity: 0.7,
+  },
+  feedActionButtonText: {
+    color: palette.text,
+    fontWeight: '700',
+  },
+  deleteActionButton: {
+    backgroundColor: palette.danger,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  deleteActionButtonText: {
+    color: palette.white,
+    fontWeight: '700',
   },
   emptyText: {
     color: palette.subtext,

@@ -115,4 +115,6 @@ export type Post = {
 export type FeedPost = {
   post: Post;
   profile: Profile | null;
+  like_count: number;
+  liked_by_me: boolean;
 };

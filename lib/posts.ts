@@ -44,6 +44,41 @@ export async function getMyPosts(userId: string) {
   };
 }
 
+export async function deletePost(postId: string, userId: string) {
+  const { error } = await supabase
+    .from('posts')
+    .delete()
+    .eq('id', postId)
+    .eq('user_id', userId);
+
+  return {
+    error: error?.message ?? null,
+  };
+}
+
+export async function likePost(postId: string, userId: string) {
+  const { error } = await supabase.from('post_likes').insert({
+    post_id: postId,
+    user_id: userId,
+  });
+
+  return {
+    error: error?.message ?? null,
+  };
+}
+
+export async function unlikePost(postId: string, userId: string) {
+  const { error } = await supabase
+    .from('post_likes')
+    .delete()
+    .eq('post_id', postId)
+    .eq('user_id', userId);
+
+  return {
+    error: error?.message ?? null,
+  };
+}
+
 export async function getFeedPosts(currentUserId: string, limit = 20) {
   const blockedResult = await getBlockedRelationships(currentUserId);
   const blockedIds = new Set(blockedResult.data ?? []);
@@ -62,44 +97,54 @@ export async function getFeedPosts(currentUserId: string, limit = 20) {
   }
 
   const typedPosts = (posts as Post[]) ?? [];
-
   const visiblePosts = typedPosts.filter((post) => !blockedIds.has(post.user_id));
 
-  const profileIds = [...new Set(visiblePosts.map((post) => post.user_id))];
-
-  if (profileIds.length === 0) {
-    return {
-      data: [] as FeedPost[],
-      error: null,
-    };
-  }
-
-  const { data: profiles, error: profilesError } = await supabase
-    .from('profiles')
-    .select('*')
-    .in('user_id', profileIds);
-
-  if (profilesError) {
-    return {
-      data: visiblePosts.map((post) => ({ post, profile: null })),
-      error: profilesError.message,
-    };
-  }
-
-  const profileMap: Record<string, Profile> = {};
-  for (const profile of ((profiles as Profile[]) ?? [])) {
-    profileMap[profile.user_id] = profile;
-  }
-
-  const feed = visiblePosts.filter((post) => {
+  const filteredPosts = visiblePosts.filter((post) => {
     if (post.visibility === 'public') return true;
     return post.user_id === currentUserId;
   });
 
+  const profileIds = [...new Set(filteredPosts.map((post) => post.user_id))];
+  const postIds = filteredPosts.map((post) => post.id);
+
+  let profileMap: Record<string, Profile> = {};
+  if (profileIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('*')
+      .in('user_id', profileIds);
+
+    for (const profile of ((profiles as Profile[]) ?? [])) {
+      profileMap[profile.user_id] = profile;
+    }
+  }
+
+  let likesByPost: Record<string, number> = {};
+  let likedByMeSet = new Set<string>();
+
+  if (postIds.length > 0) {
+    const { data: likes } = await supabase
+      .from('post_likes')
+      .select('post_id,user_id')
+      .in('post_id', postIds);
+
+    for (const row of likes ?? []) {
+      const postId = row.post_id as string;
+      const likerId = row.user_id as string;
+
+      likesByPost[postId] = (likesByPost[postId] ?? 0) + 1;
+      if (likerId === currentUserId) {
+        likedByMeSet.add(postId);
+      }
+    }
+  }
+
   return {
-    data: feed.map((post) => ({
+    data: filteredPosts.map((post) => ({
       post,
       profile: profileMap[post.user_id] ?? null,
+      like_count: likesByPost[post.id] ?? 0,
+      liked_by_me: likedByMeSet.has(post.id),
     })),
     error: null,
   };
