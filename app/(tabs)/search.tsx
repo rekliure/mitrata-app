@@ -15,14 +15,15 @@ import { RetroCard } from '@/components/RetroCard';
 import { SectionTitle } from '@/components/SectionTitle';
 import { useAuth } from '@/context/AuthContext';
 import { getDiscoverProfiles } from '@/lib/discover';
+import { getMyMatches } from '@/lib/messages';
+import { unfriendMatch } from '@/lib/matches';
 import {
   getRelationshipStatuses,
   sendConnectionRequest,
 } from '@/lib/requests';
-import { getMyMatches } from '@/lib/messages';
-import { unfriendMatch } from '@/lib/matches';
+import { blockUser, getBlockedUserIds, reportUser } from '@/lib/safety';
 import { palette } from '@/lib/theme';
-import type { Profile, RelationshipStatus, Match } from '@/types';
+import type { Match, Profile, RelationshipStatus } from '@/types';
 
 export default function SearchScreen() {
   const { user } = useAuth();
@@ -35,16 +36,19 @@ export default function SearchScreen() {
   const [error, setError] = useState<string | null>(null);
   const [sendingTo, setSendingTo] = useState<string | null>(null);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
+  const [blockingUserId, setBlockingUserId] = useState<string | null>(null);
   const [relationshipMap, setRelationshipMap] = useState<
     Record<string, RelationshipStatus>
   >({});
   const [matchMap, setMatchMap] = useState<Record<string, Match>>({});
+  const [blockedIds, setBlockedIds] = useState<string[]>([]);
 
   const loadProfiles = async () => {
     if (!user) {
       setProfiles([]);
       setRelationshipMap({});
       setMatchMap({});
+      setBlockedIds([]);
       setLoading(false);
       return;
     }
@@ -52,14 +56,18 @@ export default function SearchScreen() {
     setLoading(true);
     setError(null);
 
-    const { data, error } = await getDiscoverProfiles(user.id, {
+    const blockedResult = await getBlockedUserIds(user.id);
+    const blocked = blockedResult.data ?? [];
+    setBlockedIds(blocked);
+
+    const discoverResult = await getDiscoverProfiles(user.id, {
       city: city.trim() || undefined,
       gender: gender.trim() || undefined,
       looking_for: lookingFor.trim() || undefined,
     });
 
-    if (error) {
-      setError(error);
+    if (discoverResult.error) {
+      setError(discoverResult.error);
       setProfiles([]);
       setRelationshipMap({});
       setMatchMap({});
@@ -67,11 +75,15 @@ export default function SearchScreen() {
       return;
     }
 
-    setProfiles(data);
+    const filteredProfiles = discoverResult.data.filter(
+      (profile) => !blocked.includes(profile.user_id)
+    );
+
+    setProfiles(filteredProfiles);
 
     const relationshipResult = await getRelationshipStatuses(
       user.id,
-      data.map((profile) => profile.user_id)
+      filteredProfiles.map((profile) => profile.user_id)
     );
 
     if (relationshipResult.error) {
@@ -85,7 +97,8 @@ export default function SearchScreen() {
     if (!matchesResult.error) {
       const map: Record<string, Match> = {};
       for (const match of matchesResult.data) {
-        const otherUserId = match.user_a === user.id ? match.user_b : match.user_a;
+        const otherUserId =
+          match.user_a === user.id ? match.user_b : match.user_a;
         map[otherUserId] = match;
       }
       setMatchMap(map);
@@ -117,7 +130,11 @@ export default function SearchScreen() {
       case 'friend':
         return { label: 'Mitra', disabled: true, isFriend: true };
       case 'incoming_request':
-        return { label: 'Respond in Requests', disabled: true, isFriend: false };
+        return {
+          label: 'Respond in Requests',
+          disabled: true,
+          isFriend: false,
+        };
       case 'outgoing_request':
         return { label: 'Request sent', disabled: true, isFriend: false };
       case 'declined_once':
@@ -136,7 +153,7 @@ export default function SearchScreen() {
 
     setSendingTo(profile.user_id);
 
-    const { error } = await sendConnectionRequest(
+    const result = await sendConnectionRequest(
       user.id,
       profile.user_id,
       `Hi ${profile.display_name || ''}, I’d like to connect on Mitrata.`
@@ -144,8 +161,8 @@ export default function SearchScreen() {
 
     setSendingTo(null);
 
-    if (error) {
-      Alert.alert('Could not send request', error);
+    if (result.error) {
+      Alert.alert('Could not send request', result.error);
       return;
     }
 
@@ -163,7 +180,10 @@ export default function SearchScreen() {
     const match = matchMap[profile.user_id];
 
     if (!match) {
-      Alert.alert('Not found', 'Could not find the friendship record for this user.');
+      Alert.alert(
+        'Not found',
+        'Could not find the friendship record for this user.'
+      );
       return;
     }
 
@@ -187,11 +207,75 @@ export default function SearchScreen() {
               return;
             }
 
-            Alert.alert('Removed', `${profile.display_name || 'This user'} is no longer your Mitra.`);
+            Alert.alert(
+              'Removed',
+              `${profile.display_name || 'This user'} is no longer your Mitra.`
+            );
             await loadProfiles();
           },
         },
       ]
+    );
+  };
+
+  const onBlock = async (profile: Profile) => {
+    if (!user) return;
+
+    Alert.alert(
+      'Block user',
+      `Block ${profile.display_name || 'this user'}? They will disappear from your discover list and won’t be part of your space anymore.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            setBlockingUserId(profile.user_id);
+
+            const result = await blockUser(
+              user.id,
+              profile.user_id,
+              'Blocked from discover'
+            );
+
+            setBlockingUserId(null);
+
+            if (result.error) {
+              Alert.alert('Could not block user', result.error);
+              return;
+            }
+
+            const existingMatch = matchMap[profile.user_id];
+            if (existingMatch) {
+              await unfriendMatch(existingMatch.id);
+            }
+
+            Alert.alert('Blocked', 'User has been blocked.');
+            await loadProfiles();
+          },
+        },
+      ]
+    );
+  };
+
+  const onReport = async (profile: Profile) => {
+    if (!user) return;
+
+    const result = await reportUser(
+      user.id,
+      profile.user_id,
+      'User reported from discover',
+      `Reported profile: ${profile.display_name || 'Unknown user'}`
+    );
+
+    if (result.error) {
+      Alert.alert('Could not report user', result.error);
+      return;
+    }
+
+    Alert.alert(
+      'Reported',
+      'Thanks. This report has been recorded for review.'
     );
   };
 
@@ -278,12 +362,15 @@ export default function SearchScreen() {
           return (
             <RetroCard key={profile.id} style={styles.profileCard}>
               {profile.avatar_url ? (
-              <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
-            ) : (
-              <View style={styles.avatarWrap}>
-                <Text style={styles.avatar}>✨</Text>
-              </View>
-            )}
+                <Image
+                  source={{ uri: profile.avatar_url }}
+                  style={styles.avatarImage}
+                />
+              ) : (
+                <View style={styles.avatarWrap}>
+                  <Text style={styles.avatar}>✨</Text>
+                </View>
+              )}
 
               <View style={styles.profileMeta}>
                 <Text style={styles.name}>
@@ -335,7 +422,9 @@ export default function SearchScreen() {
                       relationUi.disabled && styles.connectButtonDisabled,
                     ]}
                     onPress={() => void onConnect(profile)}
-                    disabled={sendingTo === profile.user_id || relationUi.disabled}
+                    disabled={
+                      sendingTo === profile.user_id || relationUi.disabled
+                    }
                   >
                     <Text style={styles.connectButtonText}>
                       {sendingTo === profile.user_id
@@ -344,6 +433,31 @@ export default function SearchScreen() {
                     </Text>
                   </Pressable>
                 )}
+
+                <View style={styles.safetyRow}>
+                  <Pressable
+                    style={[
+                      styles.safetyButton,
+                      blockingUserId === profile.user_id &&
+                        styles.safetyButtonDisabled,
+                    ]}
+                    onPress={() => void onBlock(profile)}
+                    disabled={blockingUserId === profile.user_id}
+                  >
+                    <Text style={styles.safetyButtonText}>
+                      {blockingUserId === profile.user_id
+                        ? 'Blocking...'
+                        : 'Block'}
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[styles.safetyButton, styles.reportButton]}
+                    onPress={() => void onReport(profile)}
+                  >
+                    <Text style={styles.safetyButtonText}>Report</Text>
+                  </Pressable>
+                </View>
               </View>
             </RetroCard>
           );
@@ -416,10 +530,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarImage: {
-  width: 54,
-  height: 54,
-  borderRadius: 27,
-},
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+  },
   avatar: { fontSize: 24 },
   profileMeta: { flex: 1, gap: 6 },
   name: { fontSize: 18, fontWeight: '800', color: palette.text },
@@ -464,6 +578,27 @@ const styles = StyleSheet.create({
   },
   unfriendButtonText: {
     color: palette.white,
+    fontWeight: '700',
+  },
+  safetyRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  safetyButton: {
+    backgroundColor: palette.surfaceStrong,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  reportButton: {
+    backgroundColor: palette.danger,
+  },
+  safetyButtonDisabled: {
+    opacity: 0.7,
+  },
+  safetyButtonText: {
+    color: palette.text,
     fontWeight: '700',
   },
 });
