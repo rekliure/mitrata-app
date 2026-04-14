@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,13 +18,15 @@ import {
   getOutgoingRequests,
   updateRequestStatus,
 } from '@/lib/requests';
+import { getProfilesByUserIds } from '@/lib/social';
 import { palette } from '@/lib/theme';
-import type { ConnectionRequest } from '@/types';
+import type { ConnectionRequest, Profile } from '@/types';
 
 export default function RequestsScreen() {
   const { user } = useAuth();
   const [incoming, setIncoming] = useState<ConnectionRequest[]>([]);
   const [outgoing, setOutgoing] = useState<ConnectionRequest[]>([]);
+  const [profilesMap, setProfilesMap] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
 
   const loadRequests = async () => {
@@ -39,6 +41,22 @@ export default function RequestsScreen() {
 
     setIncoming(incomingResult.data);
     setOutgoing(outgoingResult.data);
+
+    const relatedIds = [
+      ...incomingResult.data.map((r) => r.sender_user_id),
+      ...outgoingResult.data.map((r) => r.receiver_user_id),
+    ];
+
+    const profilesResult = await getProfilesByUserIds(relatedIds);
+
+    if (!profilesResult.error) {
+      const map: Record<string, Profile> = {};
+      for (const profile of profilesResult.data) {
+        map[profile.user_id] = profile;
+      }
+      setProfilesMap(map);
+    }
+
     setLoading(false);
   };
 
@@ -83,12 +101,21 @@ export default function RequestsScreen() {
     await loadRequests();
   };
 
+  const incomingCount = useMemo(() => incoming.length, [incoming]);
+  const outgoingCount = useMemo(() => outgoing.length, [outgoing]);
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <SectionTitle
         title="Requests"
         subtitle="Manage incoming and outgoing connection requests."
       />
+
+      {!loading ? (
+        <Text style={styles.summary}>
+          {incomingCount} incoming • {outgoingCount} outgoing
+        </Text>
+      ) : null}
 
       {loading ? (
         <View style={styles.center}>
@@ -101,32 +128,38 @@ export default function RequestsScreen() {
             {incoming.length === 0 ? (
               <Text style={styles.emptyText}>No incoming requests.</Text>
             ) : (
-              incoming.map((request) => (
-                <View key={request.id} style={styles.requestItem}>
-                  <Text style={styles.requestText}>
-                    From: {request.sender_user_id}
-                  </Text>
-                  <Text style={styles.requestMessage}>
-                    {request.intro_message || 'No intro message'}
-                  </Text>
+              incoming.map((request) => {
+                const sender = profilesMap[request.sender_user_id];
+                return (
+                  <View key={request.id} style={styles.requestItem}>
+                    <Text style={styles.requestName}>
+                      {sender?.display_name || 'Unknown user'}
+                    </Text>
+                    <Text style={styles.requestMeta}>
+                      {[sender?.age ? `${sender.age}` : null, sender?.city].filter(Boolean).join(' • ') || 'Profile details unavailable'}
+                    </Text>
+                    <Text style={styles.requestMessage}>
+                      {request.intro_message || 'No intro message'}
+                    </Text>
 
-                  <View style={styles.row}>
-                    <Pressable
-                      style={styles.acceptBtn}
-                      onPress={() => void onAccept(request)}
-                    >
-                      <Text style={styles.btnText}>Accept</Text>
-                    </Pressable>
+                    <View style={styles.row}>
+                      <Pressable
+                        style={styles.acceptBtn}
+                        onPress={() => void onAccept(request)}
+                      >
+                        <Text style={styles.btnText}>Accept</Text>
+                      </Pressable>
 
-                    <Pressable
-                      style={styles.declineBtn}
-                      onPress={() => void onDecline(request)}
-                    >
-                      <Text style={styles.btnText}>Decline</Text>
-                    </Pressable>
+                      <Pressable
+                        style={styles.declineBtn}
+                        onPress={() => void onDecline(request)}
+                      >
+                        <Text style={styles.btnText}>Decline</Text>
+                      </Pressable>
+                    </View>
                   </View>
-                </View>
-              ))
+                );
+              })
             )}
           </RetroCard>
 
@@ -135,17 +168,23 @@ export default function RequestsScreen() {
             {outgoing.length === 0 ? (
               <Text style={styles.emptyText}>No outgoing requests.</Text>
             ) : (
-              outgoing.map((request) => (
-                <View key={request.id} style={styles.requestItem}>
-                  <Text style={styles.requestText}>
-                    To: {request.receiver_user_id}
-                  </Text>
-                  <Text style={styles.requestMessage}>
-                    {request.intro_message || 'No intro message'}
-                  </Text>
-                  <Text style={styles.pending}>Pending</Text>
-                </View>
-              ))
+              outgoing.map((request) => {
+                const receiver = profilesMap[request.receiver_user_id];
+                return (
+                  <View key={request.id} style={styles.requestItem}>
+                    <Text style={styles.requestName}>
+                      {receiver?.display_name || 'Unknown user'}
+                    </Text>
+                    <Text style={styles.requestMeta}>
+                      {[receiver?.age ? `${receiver.age}` : null, receiver?.city].filter(Boolean).join(' • ') || 'Profile details unavailable'}
+                    </Text>
+                    <Text style={styles.requestMessage}>
+                      {request.intro_message || 'No intro message'}
+                    </Text>
+                    <Text style={styles.pending}>Pending</Text>
+                  </View>
+                );
+              })
             )}
           </RetroCard>
         </>
@@ -158,6 +197,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.bg },
   content: { padding: 18, gap: 16, paddingBottom: 120 },
   center: { paddingVertical: 30, alignItems: 'center', justifyContent: 'center' },
+  summary: { color: palette.subtext, fontWeight: '600', paddingHorizontal: 4 },
   heading: { fontSize: 18, fontWeight: '700', color: palette.text, marginBottom: 10 },
   emptyText: { color: palette.subtext },
   requestItem: {
@@ -167,8 +207,9 @@ const styles = StyleSheet.create({
     marginTop: 12,
     gap: 6,
   },
-  requestText: { color: palette.text, fontWeight: '600' },
-  requestMessage: { color: palette.subtext, lineHeight: 20 },
+  requestName: { color: palette.text, fontWeight: '800', fontSize: 18 },
+  requestMeta: { color: palette.subtext },
+  requestMessage: { color: palette.text, lineHeight: 20 },
   row: { flexDirection: 'row', gap: 10, marginTop: 8 },
   acceptBtn: {
     backgroundColor: palette.accentDeep,

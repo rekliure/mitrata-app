@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,8 +14,9 @@ import { RetroCard } from '@/components/RetroCard';
 import { SectionTitle } from '@/components/SectionTitle';
 import { useAuth } from '@/context/AuthContext';
 import { getMessagesForMatch, getMyMatches, sendMessage } from '@/lib/messages';
+import { getProfilesByUserIds } from '@/lib/social';
 import { palette } from '@/lib/theme';
-import type { Match, Message } from '@/types';
+import type { Match, Message, Profile } from '@/types';
 
 export default function MessagesScreen() {
   const { user } = useAuth();
@@ -23,6 +24,7 @@ export default function MessagesScreen() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [profilesMap, setProfilesMap] = useState<Record<string, Profile>>({});
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -41,6 +43,20 @@ export default function MessagesScreen() {
     }
 
     setMatches(data);
+
+    const otherUserIds = data.map((match) =>
+      match.user_a === user.id ? match.user_b : match.user_a
+    );
+
+    const profilesResult = await getProfilesByUserIds(otherUserIds);
+
+    if (!profilesResult.error) {
+      const map: Record<string, Profile> = {};
+      for (const profile of profilesResult.data) {
+        map[profile.user_id] = profile;
+      }
+      setProfilesMap(map);
+    }
 
     if (data.length > 0) {
       const first = data[0];
@@ -106,6 +122,13 @@ export default function MessagesScreen() {
     await loadMessages(selectedMatch.id);
   };
 
+  const selectedOtherUserId = useMemo(() => {
+    if (!selectedMatch || !user) return null;
+    return selectedMatch.user_a === user.id ? selectedMatch.user_b : selectedMatch.user_a;
+  }, [selectedMatch, user]);
+
+  const selectedProfile = selectedOtherUserId ? profilesMap[selectedOtherUserId] : null;
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <SectionTitle
@@ -129,30 +152,44 @@ export default function MessagesScreen() {
           <RetroCard>
             <Text style={styles.heading}>Your matches</Text>
             <View style={styles.matchList}>
-              {matches.map((match) => (
-                <Pressable
-                  key={match.id}
-                  style={[
-                    styles.matchChip,
-                    selectedMatch?.id === match.id && styles.matchChipActive,
-                  ]}
-                  onPress={() => void onSelectMatch(match)}
-                >
-                  <Text
+              {matches.map((match) => {
+                const otherUserId = match.user_a === user?.id ? match.user_b : match.user_a;
+                const otherProfile = profilesMap[otherUserId];
+
+                return (
+                  <Pressable
+                    key={match.id}
                     style={[
-                      styles.matchChipText,
-                      selectedMatch?.id === match.id && styles.matchChipTextActive,
+                      styles.matchChip,
+                      selectedMatch?.id === match.id && styles.matchChipActive,
                     ]}
+                    onPress={() => void onSelectMatch(match)}
                   >
-                    {match.id.slice(0, 8)}
-                  </Text>
-                </Pressable>
-              ))}
+                    <Text
+                      style={[
+                        styles.matchChipText,
+                        selectedMatch?.id === match.id && styles.matchChipTextActive,
+                      ]}
+                    >
+                      {otherProfile?.display_name || 'Match'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
           </RetroCard>
 
           <RetroCard>
             <Text style={styles.heading}>Conversation</Text>
+
+            {selectedProfile ? (
+              <View style={styles.profileHeader}>
+                <Text style={styles.profileName}>{selectedProfile.display_name || 'Unknown user'}</Text>
+                <Text style={styles.profileMeta}>
+                  {[selectedProfile.age ? `${selectedProfile.age}` : null, selectedProfile.city].filter(Boolean).join(' • ')}
+                </Text>
+              </View>
+            ) : null}
 
             {messages.length === 0 ? (
               <Text style={styles.emptyText}>No messages yet. Start the conversation.</Text>
@@ -221,6 +258,21 @@ const styles = StyleSheet.create({
   },
   matchChipText: { color: palette.text, fontWeight: '700' },
   matchChipTextActive: { color: '#fff' },
+  profileHeader: {
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.border,
+  },
+  profileName: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: palette.text,
+  },
+  profileMeta: {
+    color: palette.subtext,
+    marginTop: 4,
+  },
   messageBubble: {
     maxWidth: '80%',
     borderRadius: 16,
