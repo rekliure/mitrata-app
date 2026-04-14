@@ -22,16 +22,6 @@ export type SearchFilters = {
   premiumOnly: boolean;
 };
 
-export type Post = {
-  id: string;
-  authorId: string;
-  authorName: string;
-  content: string;
-  mood: string;
-  createdAt: string;
-  likes: number;
-};
-
 export type Thread = {
   id: string;
   withUserId: string;
@@ -108,4 +98,21 @@ export type RelationshipStatus = {
   user_id: string;
   state: RelationshipState;
   declineCount: number;
+};
+
+export type PostVisibility = 'public' | 'mitras_only';
+
+export type Post = {
+  id: string;
+  user_id: string;
+  content: string;
+  mood: string | null;
+  visibility: PostVisibility;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+export type FeedPost = {
+  post: Post;
+  profile: Profile | null;
 };

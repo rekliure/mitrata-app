@@ -1,62 +1,170 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
-import { useAuth } from '@/context/AuthContext';
+import { useState } from 'react';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { router } from 'expo-router';
 import { RetroCard } from '@/components/RetroCard';
 import { SectionTitle } from '@/components/SectionTitle';
-import { loadPosts, savePosts } from '@/lib/storage';
+import { useAuth } from '@/context/AuthContext';
+import { createPost } from '@/lib/posts';
 import { palette } from '@/lib/theme';
-import { Post } from '@/types';
+import type { PostVisibility } from '@/types';
+
+const MOOD_OPTIONS = [
+  'Calm',
+  'Curious',
+  'Happy',
+  'Thoughtful',
+  'Excited',
+  'Reflective',
+];
+
+const VISIBILITY_OPTIONS: PostVisibility[] = ['public', 'mitras_only'];
 
 export default function CreateScreen() {
   const { user } = useAuth();
+
   const [content, setContent] = useState('');
-  const [mood, setMood] = useState('Open');
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [mood, setMood] = useState<string | null>('Calm');
+  const [visibility, setVisibility] = useState<PostVisibility>('public');
+  const [posting, setPosting] = useState(false);
 
-  useEffect(() => { (async () => setPosts(await loadPosts()))(); }, []);
+  const handleCreatePost = async () => {
+    if (!user) return;
 
-  async function publish() {
-    const clean = content.trim();
-    if (clean.length < 12) {
-      Alert.alert('Mitrata', 'Write at least 12 characters so people understand your intent.');
+    const trimmed = content.trim();
+
+    if (!trimmed) {
+      Alert.alert('Missing content', 'Please write something before posting.');
       return;
     }
-    const next: Post[] = [
-      {
-        id: `p-${Date.now()}`,
-        authorId: user?.id ?? 'local-user',
-        authorName: user?.name ?? 'Mitrata User',
-        content: clean,
-        mood,
-        createdAt: 'Just now',
-        likes: 0,
-      },
-      ...posts,
-    ];
-    await savePosts(next);
-    setPosts(next);
+
+    if (trimmed.length < 3) {
+      Alert.alert('Too short', 'Please write at least a few words.');
+      return;
+    }
+
+    setPosting(true);
+
+    const result = await createPost(user.id, trimmed, mood, visibility);
+
+    setPosting(false);
+
+    if (result.error) {
+      Alert.alert('Could not create post', result.error);
+      return;
+    }
+
     setContent('');
-    Alert.alert('Posted', 'Your note is now live in the feed.');
-  }
+    setMood('Calm');
+    setVisibility('public');
+
+    Alert.alert('Posted', 'Your post is now live.', [
+      {
+        text: 'Go to Home',
+        onPress: () => router.push('/'),
+      },
+      {
+        text: 'Stay here',
+        style: 'cancel',
+      },
+    ]);
+  };
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <SectionTitle title="Create" subtitle="Start a real conversation with a small honest post." />
-      <RetroCard style={styles.card}>
+      <SectionTitle
+        title="Create"
+        subtitle="Share something gentle, honest, or meaningful."
+      />
+
+      <RetroCard>
+        <Text style={styles.heading}>What’s on your mind?</Text>
+
         <TextInput
           style={styles.textarea}
-          multiline
-          placeholder="What are you looking for on Mitrata? A walk, coffee, friendship, a creative circle?"
+          placeholder="Write a short post for your space..."
           placeholderTextColor={palette.subtext}
+          multiline
           value={content}
           onChangeText={setContent}
-          textAlignVertical="top"
+          maxLength={500}
         />
-        <TextInput style={styles.input} placeholder="Mood" placeholderTextColor={palette.subtext} value={mood} onChangeText={setMood} />
-        <Pressable style={styles.button} onPress={publish}>
-          <Text style={styles.buttonText}>Publish</Text>
-        </Pressable>
+
+        <Text style={styles.counter}>{content.trim().length}/500</Text>
       </RetroCard>
+
+      <RetroCard>
+        <Text style={styles.heading}>Mood</Text>
+        <View style={styles.choiceWrap}>
+          {MOOD_OPTIONS.map((option) => {
+            const active = mood === option;
+            return (
+              <Pressable
+                key={option}
+                style={[styles.choiceChip, active && styles.choiceChipActive]}
+                onPress={() => setMood(option)}
+              >
+                <Text
+                  style={[
+                    styles.choiceChipText,
+                    active && styles.choiceChipTextActive,
+                  ]}
+                >
+                  {option}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </RetroCard>
+
+      <RetroCard>
+        <Text style={styles.heading}>Visibility</Text>
+        <View style={styles.choiceWrap}>
+          {VISIBILITY_OPTIONS.map((option) => {
+            const active = visibility === option;
+            const label = option === 'public' ? 'Public' : 'Mitras only';
+
+            return (
+              <Pressable
+                key={option}
+                style={[styles.choiceChip, active && styles.choiceChipActive]}
+                onPress={() => setVisibility(option)}
+              >
+                <Text
+                  style={[
+                    styles.choiceChipText,
+                    active && styles.choiceChipTextActive,
+                  ]}
+                >
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Text style={styles.helperText}>
+          Public posts can be seen in the broader feed. Mitras only stays more personal.
+        </Text>
+      </RetroCard>
+
+      <Pressable
+        style={[styles.postButton, posting && styles.postButtonDisabled]}
+        onPress={handleCreatePost}
+        disabled={posting}
+      >
+        <Text style={styles.postButtonText}>
+          {posting ? 'Posting...' : 'Post now'}
+        </Text>
+      </Pressable>
     </ScrollView>
   );
 }
@@ -64,31 +172,66 @@ export default function CreateScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.bg },
   content: { padding: 18, gap: 16, paddingBottom: 120 },
-  card: { gap: 12 },
+  heading: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: palette.text,
+    marginBottom: 10,
+  },
   textarea: {
-    minHeight: 180,
-    borderRadius: 18,
-    borderColor: palette.border,
-    borderWidth: 1,
+    minHeight: 140,
     backgroundColor: palette.surface,
-    color: palette.text,
-    padding: 14,
-    lineHeight: 22,
-  },
-  input: {
-    backgroundColor: palette.surface,
-    borderRadius: 16,
-    borderColor: palette.border,
     borderWidth: 1,
-    color: palette.text,
+    borderColor: palette.border,
+    borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    color: palette.text,
+    textAlignVertical: 'top',
   },
-  button: {
-    backgroundColor: palette.green,
+  counter: {
+    marginTop: 8,
+    color: palette.subtext,
+    textAlign: 'right',
+  },
+  choiceWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  choiceChip: {
+    backgroundColor: palette.surfaceStrong,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  choiceChipActive: {
+    backgroundColor: palette.accentDeep,
+  },
+  choiceChipText: {
+    color: palette.text,
+    fontWeight: '700',
+  },
+  choiceChipTextActive: {
+    color: '#fff',
+  },
+  helperText: {
+    color: palette.subtext,
+    marginTop: 10,
+    lineHeight: 20,
+  },
+  postButton: {
+    backgroundColor: palette.accentDeep,
     borderRadius: 16,
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 16,
   },
-  buttonText: { color: palette.text, fontWeight: '700' },
+  postButtonDisabled: {
+    opacity: 0.7,
+  },
+  postButtonText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 16,
+  },
 });

@@ -14,9 +14,10 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { useAuth } from '@/context/AuthContext';
 import { getRecentMitras } from '@/lib/home';
 import { getUnreadMessageCount } from '@/lib/messages';
+import { getFeedPosts } from '@/lib/posts';
 import { getPendingRequestCount } from '@/lib/requests';
 import { palette } from '@/lib/theme';
-import type { Match, Profile } from '@/types';
+import type { FeedPost, Match, Profile } from '@/types';
 
 type RecentMitraItem = {
   match: Match;
@@ -30,21 +31,25 @@ export default function HomeScreen() {
   const [pendingRequests, setPendingRequests] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [recentMitras, setRecentMitras] = useState<RecentMitraItem[]>([]);
+  const [feedPosts, setFeedPosts] = useState<FeedPost[]>([]);
 
   const loadHome = async () => {
     if (!user) return;
 
     setLoading(true);
 
-    const [requestsResult, messagesResult, mitrasResult] = await Promise.all([
-      getPendingRequestCount(user.id),
-      getUnreadMessageCount(user.id),
-      getRecentMitras(user.id, 5),
-    ]);
+    const [requestsResult, messagesResult, mitrasResult, feedResult] =
+      await Promise.all([
+        getPendingRequestCount(user.id),
+        getUnreadMessageCount(user.id),
+        getRecentMitras(user.id, 5),
+        getFeedPosts(user.id, 12),
+      ]);
 
     setPendingRequests(requestsResult.count);
     setUnreadMessages(messagesResult.count);
     setRecentMitras(mitrasResult.data);
+    setFeedPosts(feedResult.data);
 
     setLoading(false);
   };
@@ -66,17 +71,38 @@ export default function HomeScreen() {
     user?.email?.split('@')[0] ||
     'Mitra';
 
-  const Avatar = ({ avatarUrl, emoji = '🌙' }: { avatarUrl?: string | null; emoji?: string }) => {
+  const Avatar = ({
+    avatarUrl,
+    emoji = '🌙',
+    size = 64,
+  }: {
+    avatarUrl?: string | null;
+    emoji?: string;
+    size?: number;
+  }) => {
     if (avatarUrl) {
-      return <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />;
+      return (
+        <Image
+          source={{ uri: avatarUrl }}
+          style={{ width: size, height: size, borderRadius: size / 2 }}
+        />
+      );
     }
 
     return (
-      <View style={styles.avatarWrap}>
-        <Text style={styles.avatarEmoji}>{emoji}</Text>
+      <View
+        style={[
+          styles.avatarWrap,
+          { width: size, height: size, borderRadius: size / 2 },
+        ]}
+      >
+        <Text style={[styles.avatarEmoji, { fontSize: size * 0.42 }]}>{emoji}</Text>
       </View>
     );
   };
+
+  const formatVisibility = (value: string) =>
+    value === 'mitras_only' ? 'Mitras only' : 'Public';
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -143,10 +169,10 @@ export default function HomeScreen() {
 
               <Pressable
                 style={styles.actionButton}
-                onPress={() => router.push('/profile')}
+                onPress={() => router.push('/create')}
               >
-                <Text style={styles.actionTitle}>Profile</Text>
-                <Text style={styles.actionSub}>Edit identity</Text>
+                <Text style={styles.actionTitle}>Create</Text>
+                <Text style={styles.actionSub}>Share a post</Text>
               </Pressable>
             </View>
           </RetroCard>
@@ -166,7 +192,7 @@ export default function HomeScreen() {
                     style={styles.mitraRow}
                     onPress={() => router.push('/messages')}
                   >
-                    <Avatar avatarUrl={mitra?.avatar_url} emoji="✨" />
+                    <Avatar avatarUrl={mitra?.avatar_url} emoji="✨" size={48} />
 
                     <View style={styles.mitraBody}>
                       <Text style={styles.mitraName}>
@@ -186,6 +212,52 @@ export default function HomeScreen() {
                       </Text>
                     </View>
                   </Pressable>
+                ))}
+              </View>
+            )}
+          </RetroCard>
+
+          <RetroCard>
+            <View style={styles.feedHeader}>
+              <Text style={styles.heading}>Recent feed</Text>
+              <Pressable onPress={() => router.push('/create')}>
+                <Text style={styles.feedAction}>Post</Text>
+              </Pressable>
+            </View>
+
+            {feedPosts.length === 0 ? (
+              <Text style={styles.emptyText}>
+                No posts yet. Be the first one to say something meaningful.
+              </Text>
+            ) : (
+              <View style={styles.feedList}>
+                {feedPosts.map(({ post, profile: postProfile }) => (
+                  <View key={post.id} style={styles.feedCard}>
+                    <View style={styles.feedTop}>
+                      <Avatar
+                        avatarUrl={postProfile?.avatar_url}
+                        emoji="✨"
+                        size={42}
+                      />
+
+                      <View style={styles.feedMetaWrap}>
+                        <Text style={styles.feedName}>
+                          {postProfile?.display_name || 'Unknown user'}
+                        </Text>
+                        <Text style={styles.feedMeta}>
+                          {[postProfile?.city, formatVisibility(post.visibility)]
+                            .filter(Boolean)
+                            .join(' • ')}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {post.mood ? (
+                      <Text style={styles.feedMood}>Mood: {post.mood}</Text>
+                    ) : null}
+
+                    <Text style={styles.feedContent}>{post.content}</Text>
+                  </View>
                 ))}
               </View>
             )}
@@ -235,17 +307,9 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   avatarWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
     backgroundColor: palette.surfaceStrong,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  avatarImage: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
   },
   avatarEmoji: {
     fontSize: 28,
@@ -321,6 +385,49 @@ const styles = StyleSheet.create({
   mitraBio: {
     color: palette.text,
     lineHeight: 20,
+  },
+  feedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  feedAction: {
+    color: palette.accentDeep,
+    fontWeight: '800',
+  },
+  feedList: {
+    gap: 12,
+  },
+  feedCard: {
+    backgroundColor: palette.surfaceStrong,
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+  },
+  feedTop: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+  },
+  feedMetaWrap: {
+    flex: 1,
+  },
+  feedName: {
+    color: palette.text,
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  feedMeta: {
+    color: palette.subtext,
+    marginTop: 2,
+  },
+  feedMood: {
+    color: palette.accentDeep,
+    fontWeight: '700',
+  },
+  feedContent: {
+    color: palette.text,
+    lineHeight: 22,
   },
   emptyText: {
     color: palette.subtext,
