@@ -17,6 +17,14 @@ type RequestRow = {
   status: string;
 };
 
+type ActivitySeenRow = {
+  activity_key: string;
+};
+
+function buildActivityKey(kind: 'request' | 'like' | 'comment', id: string) {
+  return `${kind}:${id}`;
+}
+
 export async function getActivityItems(userId: string, limit = 30) {
   const blockedResult = await getBlockedRelationships(userId);
   const blockedIds = new Set(blockedResult.data ?? []);
@@ -113,9 +121,10 @@ export async function getActivityItems(userId: string, limit = 30) {
     }
   }
 
-  const items: ActivityItem[] = [
+  const itemsBase = [
     ...requests.map((row) => ({
       id: `request-${row.id}`,
+      key: buildActivityKey('request', row.id),
       kind: 'request' as const,
       created_at: row.created_at,
       actor_user_id: row.sender_user_id,
@@ -124,6 +133,7 @@ export async function getActivityItems(userId: string, limit = 30) {
     })),
     ...likes.map((row) => ({
       id: `like-${row.id}`,
+      key: buildActivityKey('like', row.id),
       kind: 'like' as const,
       created_at: row.created_at,
       actor_user_id: row.user_id,
@@ -133,6 +143,7 @@ export async function getActivityItems(userId: string, limit = 30) {
     })),
     ...comments.map((row) => ({
       id: `comment-${row.id}`,
+      key: buildActivityKey('comment', row.id),
       kind: 'comment' as const,
       created_at: row.created_at,
       actor_user_id: row.user_id,
@@ -141,15 +152,68 @@ export async function getActivityItems(userId: string, limit = 30) {
       post_preview: postMap[row.post_id]?.content ?? null,
       comment_preview: row.body,
     })),
-  ]
-    .sort(
-      (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    )
-    .slice(0, limit);
+  ].sort(
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+
+  const keys = itemsBase.map((item) => item.key);
+
+  let seenSet = new Set<string>();
+  if (keys.length > 0) {
+    const { data: seenRows, error: seenError } = await supabase
+      .from('activity_seen')
+      .select('activity_key')
+      .eq('user_id', userId)
+      .in('activity_key', keys);
+
+    if (!seenError) {
+      seenSet = new Set(
+        ((seenRows as ActivitySeenRow[]) ?? []).map((row) => row.activity_key)
+      );
+    }
+  }
+
+  const items: ActivityItem[] = itemsBase.slice(0, limit).map((item) => ({
+    ...item,
+    is_seen: seenSet.has(item.key),
+  }));
 
   return {
     data: items,
     error: null,
+  };
+}
+
+export async function getUnreadActivityCount(userId: string) {
+  const result = await getActivityItems(userId, 100);
+  if (result.error) {
+    return { count: 0, error: result.error };
+  }
+
+  return {
+    count: result.data.filter((item) => !item.is_seen).length,
+    error: null,
+  };
+}
+
+export async function markActivitiesSeen(userId: string, activityKeys: string[]) {
+  const uniqueKeys = [...new Set(activityKeys)].filter(Boolean);
+
+  if (uniqueKeys.length === 0) {
+    return { error: null };
+  }
+
+  const rows = uniqueKeys.map((key) => ({
+    user_id: userId,
+    activity_key: key,
+  }));
+
+  const { error } = await supabase
+    .from('activity_seen')
+    .upsert(rows, { onConflict: 'user_id,activity_key' });
+
+  return {
+    error: error?.message ?? null,
   };
 }

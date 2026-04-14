@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -12,7 +12,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { RetroCard } from '@/components/RetroCard';
 import { SectionTitle } from '@/components/SectionTitle';
 import { useAuth } from '@/context/AuthContext';
-import { getActivityItems } from '@/lib/activity';
+import { getActivityItems, markActivitiesSeen } from '@/lib/activity';
 import { palette } from '@/lib/theme';
 import type { ActivityItem } from '@/types';
 
@@ -46,6 +46,26 @@ export default function ActivityScreen() {
       void loadActivity();
     }, [loadActivity])
   );
+
+  useEffect(() => {
+    if (!user || items.length === 0) return;
+
+    const unseenKeys = items.filter((item) => !item.is_seen).map((item) => item.key);
+    if (unseenKeys.length === 0) return;
+
+    const run = async () => {
+      const result = await markActivitiesSeen(user.id, unseenKeys);
+      if (!result.error) {
+        setItems((prev) =>
+          prev.map((item) =>
+            unseenKeys.includes(item.key) ? { ...item, is_seen: true } : item
+          )
+        );
+      }
+    };
+
+    void run();
+  }, [user?.id, items]);
 
   const formatTime = (value: string) => {
     try {
@@ -138,7 +158,12 @@ export default function ActivityScreen() {
               onPress={() => onOpenItem(item)}
               style={styles.cardWrap}
             >
-              <RetroCard style={styles.itemCard}>
+              <RetroCard
+                style={[
+                  styles.itemCard,
+                  !item.is_seen && styles.unseenCard,
+                ]}
+              >
                 <Avatar avatarUrl={item.actor_profile?.avatar_url} />
 
                 <View style={styles.itemBody}>
@@ -146,6 +171,8 @@ export default function ActivityScreen() {
                   <Text style={styles.itemText}>{buildBody(item)}</Text>
                   <Text style={styles.itemTime}>{formatTime(item.created_at)}</Text>
                 </View>
+
+                {!item.is_seen ? <View style={styles.dot} /> : null}
               </RetroCard>
             </Pressable>
           ))}
@@ -174,6 +201,10 @@ const styles = StyleSheet.create({
     gap: 12,
     alignItems: 'flex-start',
   },
+  unseenCard: {
+    borderWidth: 1,
+    borderColor: palette.accentDeep,
+  },
   avatarWrap: {
     backgroundColor: palette.surfaceStrong,
     alignItems: 'center',
@@ -199,6 +230,13 @@ const styles = StyleSheet.create({
     color: palette.subtext,
     fontSize: 12,
     marginTop: 2,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: palette.accentDeep,
+    marginTop: 6,
   },
   emptyTitle: {
     fontSize: 18,

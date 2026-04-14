@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { getUnreadActivityCount } from '@/lib/activity';
 import { getUnreadMessageCount } from '@/lib/messages';
 import { getPendingRequestCount } from '@/lib/requests';
 import { supabase } from '@/lib/supabase';
@@ -14,17 +15,20 @@ export default function TabsLayout() {
 
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [pendingRequests, setPendingRequests] = useState(0);
+  const [unreadActivity, setUnreadActivity] = useState(0);
 
   const loadBadges = async () => {
     if (!user) return;
 
-    const [messagesResult, requestsResult] = await Promise.all([
+    const [messagesResult, requestsResult, activityResult] = await Promise.all([
       getUnreadMessageCount(user.id),
       getPendingRequestCount(user.id),
+      getUnreadActivityCount(user.id),
     ]);
 
     setUnreadMessages(messagesResult.count);
     setPendingRequests(requestsResult.count);
+    setUnreadActivity(activityResult.count);
   };
 
   useEffect(() => {
@@ -70,9 +74,35 @@ export default function TabsLayout() {
       )
       .subscribe();
 
+    const activityChannel = supabase
+      .channel(`tab-badges-activity-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'post_likes' },
+        () => {
+          void loadBadges();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'post_comments' },
+        () => {
+          void loadBadges();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'activity_seen' },
+        () => {
+          void loadBadges();
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(messagesChannel);
       supabase.removeChannel(requestsChannel);
+      supabase.removeChannel(activityChannel);
     };
   }, [user?.id]);
 
@@ -121,6 +151,7 @@ export default function TabsLayout() {
         name="activity"
         options={{
           title: 'Activity',
+          tabBarBadge: unreadActivity > 0 ? unreadActivity : undefined,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="notifications-outline" size={size} color={color} />
           ),

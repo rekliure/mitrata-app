@@ -137,6 +137,7 @@ export type ActivityKind = 'request' | 'like' | 'comment';
 
 export type ActivityItem = {
   id: string;
+  key: string;
   kind: ActivityKind;
   created_at: string;
   actor_user_id: string;
@@ -145,4 +146,5 @@ export type ActivityItem = {
   post_id?: string;
   post_preview?: string | null;
   comment_preview?: string | null;
+  is_seen: boolean;
 };
