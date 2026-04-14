@@ -43,6 +43,13 @@ export default function TabsLayout() {
           void loadBadges();
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'matches' },
+        () => {
+          void loadBadges();
+        }
+      )
       .subscribe();
 
     const requestsChannel = supabase

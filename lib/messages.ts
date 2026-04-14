@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { Match, Message } from '@/types';
+import { getBlockedRelationships } from '@/lib/social';
 
 export async function getMyMatches(userId: string) {
   const { data, error } = await supabase
@@ -32,9 +33,9 @@ export async function sendMessage(
   senderUserId: string,
   body: string
 ) {
-  const text = body.trim();
+  const trimmed = body.trim();
 
-  if (!text) {
+  if (!trimmed) {
     return { data: null, error: 'Message cannot be empty.' };
   }
 
@@ -43,7 +44,7 @@ export async function sendMessage(
     .insert({
       match_id: matchId,
       sender_user_id: senderUserId,
-      body: text,
+      body: trimmed,
     })
     .select()
     .single();
@@ -54,48 +55,24 @@ export async function sendMessage(
   };
 }
 
-export async function markMessagesAsRead(matchId: string, currentUserId: string) {
-  const { error } = await supabase.rpc('mark_match_messages_read', {
-    p_match_id: matchId,
-  });
-
-  return {
-    error: error?.message ?? null,
-  };
-}
-
-export async function getUnreadMessageCount(userId: string) {
-  const { data: matches, error: matchError } = await supabase
-    .from('matches')
-    .select('*')
-    .or(`user_a.eq.${userId},user_b.eq.${userId}`);
-
-  if (matchError) {
-    return { count: 0, error: matchError.message };
-  }
-
-  const matchIds = ((matches as Match[]) ?? []).map((m) => m.id);
-
-  if (matchIds.length === 0) {
-    return { count: 0, error: null };
-  }
-
+export async function markMessagesAsRead(matchId: string, userId: string) {
   const { data, error } = await supabase
     .from('messages')
-    .select('*')
-    .in('match_id', matchIds)
+    .update({ read_at: new Date().toISOString() })
+    .eq('match_id', matchId)
     .neq('sender_user_id', userId)
-    .is('read_at', null);
+    .is('read_at', null)
+    .select();
 
   return {
-    count: data?.length ?? 0,
+    data: (data as Message[]) ?? [],
     error: error?.message ?? null,
   };
 }
 
 export function subscribeToMatchMessages(
   matchId: string,
-  onMessage: () => void
+  onChange: () => void
 ) {
   const channel = supabase
     .channel(`messages:${matchId}`)
@@ -108,12 +85,52 @@ export function subscribeToMatchMessages(
         filter: `match_id=eq.${matchId}`,
       },
       () => {
-        onMessage();
+        onChange();
       }
     )
     .subscribe();
 
   return () => {
     supabase.removeChannel(channel);
+  };
+}
+
+export async function getUnreadMessageCount(userId: string) {
+  const blockedResult = await getBlockedRelationships(userId);
+  const blockedIds = new Set(blockedResult.data ?? []);
+
+  const matchesResult = await getMyMatches(userId);
+
+  if (matchesResult.error) {
+    return {
+      count: 0,
+      error: matchesResult.error,
+    };
+  }
+
+  const safeMatches = matchesResult.data.filter((match) => {
+    const otherUserId = match.user_a === userId ? match.user_b : match.user_a;
+    return !blockedIds.has(otherUserId);
+  });
+
+  const safeMatchIds = safeMatches.map((match) => match.id);
+
+  if (safeMatchIds.length === 0) {
+    return {
+      count: 0,
+      error: null,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .in('match_id', safeMatchIds)
+    .neq('sender_user_id', userId)
+    .is('read_at', null);
+
+  return {
+    count: (data as Message[] | null)?.length ?? 0,
+    error: error?.message ?? null,
   };
 }
