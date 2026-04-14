@@ -118,6 +118,15 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="activity"
+        options={{
+          title: 'Activity',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="notifications-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="messages"
         options={{
           title: 'Messages',
@@ -148,6 +157,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="requests"
         options={{
+          href: null,
           title: 'Requests',
           tabBarBadge: pendingRequests > 0 ? pendingRequests : undefined,
           tabBarIcon: ({ color, size }) => (
