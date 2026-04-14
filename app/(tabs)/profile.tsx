@@ -9,12 +9,16 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { RetroCard } from '@/components/RetroCard';
 import { SectionTitle } from '@/components/SectionTitle';
 import { pickAvatarImage, uploadAvatar } from '@/lib/avatar';
 import { updateMyProfile } from '@/lib/profile';
+import { getMyBlockedProfiles, unblockUser } from '@/lib/safety';
 import { palette } from '@/lib/theme';
+import type { Profile } from '@/types';
 
 export default function ProfileScreen() {
   const { user, profile, signOut, refreshProfile } = useAuth();
@@ -28,6 +32,8 @@ export default function ProfileScreen() {
   const [bio, setBio] = useState('');
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [blockedProfiles, setBlockedProfiles] = useState<Profile[]>([]);
+  const [unblockingUserId, setUnblockingUserId] = useState<string | null>(null);
 
   useEffect(() => {
     setDisplayName(profile?.display_name ?? '');
@@ -38,6 +44,29 @@ export default function ProfileScreen() {
     setLookingFor(profile?.looking_for ?? '');
     setBio(profile?.bio ?? '');
   }, [profile]);
+
+  const loadBlockedProfiles = useCallback(async () => {
+    if (!user) {
+      setBlockedProfiles([]);
+      return;
+    }
+
+    const result = await getMyBlockedProfiles(user.id);
+
+    if (result.error) {
+      console.log('blocked profiles load error:', result.error);
+      setBlockedProfiles([]);
+      return;
+    }
+
+    setBlockedProfiles(result.data);
+  }, [user?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadBlockedProfiles();
+    }, [loadBlockedProfiles])
+  );
 
   const handleSave = async () => {
     if (!user) return;
@@ -119,6 +148,36 @@ export default function ProfileScreen() {
 
     await refreshProfile();
     Alert.alert('Updated', 'Your avatar has been updated.');
+  };
+
+  const handleUnblock = async (blockedProfile: Profile) => {
+    if (!user) return;
+
+    Alert.alert(
+      'Unblock user',
+      `Unblock ${blockedProfile.display_name || 'this user'}? They may appear in Discover again.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unblock',
+          onPress: async () => {
+            setUnblockingUserId(blockedProfile.user_id);
+
+            const result = await unblockUser(user.id, blockedProfile.user_id);
+
+            setUnblockingUserId(null);
+
+            if (result.error) {
+              Alert.alert('Could not unblock user', result.error);
+              return;
+            }
+
+            Alert.alert('Unblocked', 'User has been removed from your blocked list.');
+            await loadBlockedProfiles();
+          },
+        },
+      ]
+    );
   };
 
   const handleSignOut = async () => {
@@ -232,6 +291,60 @@ export default function ProfileScreen() {
         </Pressable>
       </RetroCard>
 
+      <RetroCard>
+        <Text style={styles.heading}>Blocked users</Text>
+
+        {blockedProfiles.length === 0 ? (
+          <Text style={styles.emptyText}>You have not blocked anyone.</Text>
+        ) : (
+          <View style={styles.blockedList}>
+            {blockedProfiles.map((blockedProfile) => (
+              <View key={blockedProfile.user_id} style={styles.blockedRow}>
+                <View style={styles.blockedLeft}>
+                  {blockedProfile.avatar_url ? (
+                    <Image
+                      source={{ uri: blockedProfile.avatar_url }}
+                      style={styles.blockedAvatarImage}
+                    />
+                  ) : (
+                    <View style={styles.blockedAvatarWrap}>
+                      <Text style={styles.blockedAvatarText}>✨</Text>
+                    </View>
+                  )}
+
+                  <View style={styles.blockedMeta}>
+                    <Text style={styles.blockedName}>
+                      {blockedProfile.display_name || 'Unknown user'}
+                    </Text>
+                    <Text style={styles.blockedSubline}>
+                      {[blockedProfile.age ? `${blockedProfile.age}` : null, blockedProfile.city]
+                        .filter(Boolean)
+                        .join(' • ') || 'Profile details unavailable'}
+                    </Text>
+                  </View>
+                </View>
+
+                <Pressable
+                  style={[
+                    styles.unblockButton,
+                    unblockingUserId === blockedProfile.user_id &&
+                      styles.unblockButtonDisabled,
+                  ]}
+                  onPress={() => void handleUnblock(blockedProfile)}
+                  disabled={unblockingUserId === blockedProfile.user_id}
+                >
+                  <Text style={styles.unblockButtonText}>
+                    {unblockingUserId === blockedProfile.user_id
+                      ? 'Unblocking...'
+                      : 'Unblock'}
+                  </Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        )}
+      </RetroCard>
+
       <Pressable style={styles.signOutButton} onPress={handleSignOut}>
         <Text style={styles.signOutButtonText}>Sign out</Text>
       </Pressable>
@@ -299,6 +412,67 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: '#fff',
     fontWeight: '700',
+  },
+  blockedList: {
+    gap: 12,
+  },
+  blockedRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    alignItems: 'center',
+    paddingTop: 6,
+  },
+  blockedLeft: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+    flex: 1,
+  },
+  blockedAvatarWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: palette.surfaceStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blockedAvatarImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  blockedAvatarText: {
+    fontSize: 20,
+  },
+  blockedMeta: {
+    flex: 1,
+    gap: 2,
+  },
+  blockedName: {
+    color: palette.text,
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  blockedSubline: {
+    color: palette.subtext,
+  },
+  unblockButton: {
+    backgroundColor: palette.blush,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  unblockButtonDisabled: {
+    opacity: 0.7,
+  },
+  unblockButtonText: {
+    color: palette.text,
+    fontWeight: '700',
+  },
+  emptyText: {
+    color: palette.subtext,
+    lineHeight: 22,
   },
   signOutButton: {
     backgroundColor: palette.blush,

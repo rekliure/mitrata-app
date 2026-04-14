@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import type { Profile } from '@/types';
 
 export async function blockUser(
   blockerUserId: string,
@@ -42,6 +43,36 @@ export async function getBlockedUserIds(blockerUserId: string) {
 
   return {
     data: (data ?? []).map((row) => row.blocked_user_id as string),
+    error: error?.message ?? null,
+  };
+}
+
+export async function getMyBlockedProfiles(blockerUserId: string) {
+  const blockedIdsResult = await getBlockedUserIds(blockerUserId);
+
+  if (blockedIdsResult.error) {
+    return {
+      data: [] as Profile[],
+      error: blockedIdsResult.error,
+    };
+  }
+
+  const blockedIds = blockedIdsResult.data ?? [];
+
+  if (blockedIds.length === 0) {
+    return {
+      data: [] as Profile[],
+      error: null,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .in('user_id', blockedIds);
+
+  return {
+    data: (data as Profile[]) ?? [],
     error: error?.message ?? null,
   };
 }
