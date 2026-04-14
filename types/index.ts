@@ -85,3 +85,11 @@ export type Match = {
   user_b: string;
   created_at: string;
 };
+
+export type Message = {
+  id: string;
+  match_id: string;
+  sender_user_id: string;
+  body: string;
+  created_at: string;
+};
