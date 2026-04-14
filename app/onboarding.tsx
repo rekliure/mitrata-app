@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { Redirect } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { upsertMyProfile } from '@/lib/profile';
@@ -73,7 +73,12 @@ export default function OnboardingScreen() {
       <TextInput style={styles.input} placeholder="Gender" value={gender} onChangeText={setGender} />
       <TextInput style={styles.input} placeholder="City" value={city} onChangeText={setCity} />
       <TextInput style={styles.input} placeholder="Country" value={country} onChangeText={setCountry} />
-      <TextInput style={styles.input} placeholder="Looking for (friendship / dating / both)" value={lookingFor} onChangeText={setLookingFor} />
+      <TextInput
+        style={styles.input}
+        placeholder="Looking for (friendship / dating / both)"
+        value={lookingFor}
+        onChangeText={setLookingFor}
+      />
       <TextInput
         style={[styles.input, styles.bioInput]}
         placeholder="Short bio"
@@ -97,7 +102,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: palette.surface,
     borderWidth: 1,
-    borderColor: palette.border,
+    borderColor: palette.line,
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 14,

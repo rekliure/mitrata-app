@@ -18,7 +18,7 @@ export default function IndexScreen() {
   }
 
   if (!profile?.is_profile_complete) {
-    return <Redirect href="/onboarding" />;
+    return <Redirect href={"/onboarding" as any} />;
   }
 
   return <Redirect href="/(tabs)" />;
