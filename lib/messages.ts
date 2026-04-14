@@ -53,3 +53,70 @@ export async function sendMessage(
     error: error?.message ?? null,
   };
 }
+
+export async function markMessagesAsRead(matchId: string, currentUserId: string) {
+  const { error } = await supabase
+    .from('messages')
+    .update({ read_at: new Date().toISOString() })
+    .eq('match_id', matchId)
+    .neq('sender_user_id', currentUserId)
+    .is('read_at', null);
+
+  return {
+    error: error?.message ?? null,
+  };
+}
+
+export async function getUnreadMessageCount(userId: string) {
+  const { data: matches, error: matchError } = await supabase
+    .from('matches')
+    .select('*')
+    .or(`user_a.eq.${userId},user_b.eq.${userId}`);
+
+  if (matchError) {
+    return { count: 0, error: matchError.message };
+  }
+
+  const matchIds = ((matches as Match[]) ?? []).map((m) => m.id);
+
+  if (matchIds.length === 0) {
+    return { count: 0, error: null };
+  }
+
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .in('match_id', matchIds)
+    .neq('sender_user_id', userId)
+    .is('read_at', null);
+
+  return {
+    count: data?.length ?? 0,
+    error: error?.message ?? null,
+  };
+}
+
+export function subscribeToMatchMessages(
+  matchId: string,
+  onMessage: () => void
+) {
+  const channel = supabase
+    .channel(`messages:${matchId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'messages',
+        filter: `match_id=eq.${matchId}`,
+      },
+      () => {
+        onMessage();
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}

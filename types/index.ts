@@ -92,4 +92,5 @@ export type Message = {
   sender_user_id: string;
   body: string;
   created_at: string;
+  read_at: string | null;
 };

@@ -13,7 +13,13 @@ import { useFocusEffect } from 'expo-router';
 import { RetroCard } from '@/components/RetroCard';
 import { SectionTitle } from '@/components/SectionTitle';
 import { useAuth } from '@/context/AuthContext';
-import { getMessagesForMatch, getMyMatches, sendMessage } from '@/lib/messages';
+import {
+  getMessagesForMatch,
+  getMyMatches,
+  markMessagesAsRead,
+  sendMessage,
+  subscribeToMatchMessages,
+} from '@/lib/messages';
 import { getProfilesByUserIds } from '@/lib/social';
 import { palette } from '@/lib/theme';
 import type { Match, Message, Profile } from '@/types';
@@ -61,14 +67,7 @@ export default function MessagesScreen() {
     if (data.length > 0) {
       const first = data[0];
       setSelectedMatch(first);
-
-      const messagesResult = await getMessagesForMatch(first.id);
-      if (messagesResult.error) {
-        Alert.alert('Could not load messages', messagesResult.error);
-        setMessages([]);
-      } else {
-        setMessages(messagesResult.data);
-      }
+      await loadMessages(first.id, true);
     } else {
       setSelectedMatch(null);
       setMessages([]);
@@ -77,7 +76,7 @@ export default function MessagesScreen() {
     setLoading(false);
   };
 
-  const loadMessages = async (matchId: string) => {
+  const loadMessages = async (matchId: string, markRead = false) => {
     const { data, error } = await getMessagesForMatch(matchId);
 
     if (error) {
@@ -87,6 +86,10 @@ export default function MessagesScreen() {
     }
 
     setMessages(data);
+
+    if (markRead && user) {
+      await markMessagesAsRead(matchId, user.id);
+    }
   };
 
   useEffect(() => {
@@ -99,9 +102,19 @@ export default function MessagesScreen() {
     }, [user?.id])
   );
 
+  useEffect(() => {
+    if (!selectedMatch || !user) return;
+
+    const unsubscribe = subscribeToMatchMessages(selectedMatch.id, () => {
+      void loadMessages(selectedMatch.id, true);
+    });
+
+    return unsubscribe;
+  }, [selectedMatch?.id, user?.id]);
+
   const onSelectMatch = async (match: Match) => {
     setSelectedMatch(match);
-    await loadMessages(match.id);
+    await loadMessages(match.id, true);
   };
 
   const onSend = async () => {
@@ -119,7 +132,7 @@ export default function MessagesScreen() {
     }
 
     setDraft('');
-    await loadMessages(selectedMatch.id);
+    await loadMessages(selectedMatch.id, true);
   };
 
   const selectedOtherUserId = useMemo(() => {
@@ -186,7 +199,9 @@ export default function MessagesScreen() {
               <View style={styles.profileHeader}>
                 <Text style={styles.profileName}>{selectedProfile.display_name || 'Unknown user'}</Text>
                 <Text style={styles.profileMeta}>
-                  {[selectedProfile.age ? `${selectedProfile.age}` : null, selectedProfile.city].filter(Boolean).join(' • ')}
+                  {[selectedProfile.age ? `${selectedProfile.age}` : null, selectedProfile.city]
+                    .filter(Boolean)
+                    .join(' • ')}
                 </Text>
               </View>
             ) : null}
@@ -213,6 +228,9 @@ export default function MessagesScreen() {
                     >
                       {message.body}
                     </Text>
+                    {!mine && !message.read_at ? (
+                      <Text style={styles.unreadLabel}>New</Text>
+                    ) : null}
                   </View>
                 );
               })
@@ -291,6 +309,12 @@ const styles = StyleSheet.create({
   messageText: { lineHeight: 20 },
   myBubbleText: { color: '#fff' },
   theirBubbleText: { color: palette.text },
+  unreadLabel: {
+    marginTop: 6,
+    color: palette.accentDeep,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   composeBox: {
     marginTop: 14,
     gap: 10,

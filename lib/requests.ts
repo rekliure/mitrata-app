@@ -111,3 +111,16 @@ export async function createMatch(userA: string, userB: string) {
     error: error?.message ?? null,
   };
 }
+
+export async function getPendingRequestCount(userId: string) {
+  const { data, error } = await supabase
+    .from('connection_requests')
+    .select('*')
+    .eq('receiver_user_id', userId)
+    .eq('status', 'pending');
+
+  return {
+    count: data?.length ?? 0,
+    error: error?.message ?? null,
+  };
+}
