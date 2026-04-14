@@ -68,3 +68,20 @@ export type Profile = {
   created_at: string;
   updated_at: string;
 };
+
+export type ConnectionRequest = {
+  id: string;
+  sender_user_id: string;
+  receiver_user_id: string;
+  intro_message: string | null;
+  status: 'pending' | 'accepted' | 'declined' | 'canceled';
+  created_at: string;
+  updated_at: string;
+};
+
+export type Match = {
+  id: string;
+  user_a: string;
+  user_b: string;
+  created_at: string;
+};
