@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
@@ -16,14 +17,17 @@ import { useAuth } from '@/context/AuthContext';
 import { getRecentMitras } from '@/lib/home';
 import { getUnreadMessageCount } from '@/lib/messages';
 import {
+  createComment,
+  deleteComment,
   deletePost,
+  getCommentsForPost,
   getFeedPosts,
   likePost,
   unlikePost,
 } from '@/lib/posts';
 import { getPendingRequestCount } from '@/lib/requests';
 import { palette } from '@/lib/theme';
-import type { FeedPost, Match, Profile } from '@/types';
+import type { FeedComment, FeedPost, Match, Profile } from '@/types';
 
 type RecentMitraItem = {
   match: Match;
@@ -42,6 +46,12 @@ export default function HomeScreen() {
   const [feedPosts, setFeedPosts] = useState<FeedPost[]>([]);
   const [feedFilter, setFeedFilter] = useState<FeedFilter>('all');
   const [busyPostId, setBusyPostId] = useState<string | null>(null);
+
+  const [expandedPostId, setExpandedPostId] = useState<string | null>(null);
+  const [commentsMap, setCommentsMap] = useState<Record<string, FeedComment[]>>({});
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [busyCommentPostId, setBusyCommentPostId] = useState<string | null>(null);
+  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
 
   const loadHome = async () => {
     if (!user) return;
@@ -169,11 +179,79 @@ export default function HomeScreen() {
               return;
             }
 
+            if (expandedPostId === item.post.id) {
+              setExpandedPostId(null);
+            }
+
             await loadHome();
           },
         },
       ]
     );
+  };
+
+  const handleToggleComments = async (postId: string) => {
+    if (expandedPostId === postId) {
+      setExpandedPostId(null);
+      return;
+    }
+
+    setExpandedPostId(postId);
+
+    if (!commentsMap[postId]) {
+      const result = await getCommentsForPost(postId);
+      if (!result.error) {
+        setCommentsMap((prev) => ({ ...prev, [postId]: result.data }));
+      }
+    }
+  };
+
+  const handleCreateComment = async (postId: string) => {
+    if (!user) return;
+
+    const body = (commentDrafts[postId] ?? '').trim();
+    if (!body) return;
+
+    setBusyCommentPostId(postId);
+
+    const result = await createComment(postId, user.id, body);
+
+    setBusyCommentPostId(null);
+
+    if (result.error) {
+      Alert.alert('Could not add comment', result.error);
+      return;
+    }
+
+    const commentsResult = await getCommentsForPost(postId);
+    if (!commentsResult.error) {
+      setCommentsMap((prev) => ({ ...prev, [postId]: commentsResult.data }));
+    }
+
+    setCommentDrafts((prev) => ({ ...prev, [postId]: '' }));
+    await loadHome();
+  };
+
+  const handleDeleteComment = async (postId: string, commentId: string) => {
+    if (!user) return;
+
+    setDeletingCommentId(commentId);
+
+    const result = await deleteComment(commentId, user.id);
+
+    setDeletingCommentId(null);
+
+    if (result.error) {
+      Alert.alert('Could not delete comment', result.error);
+      return;
+    }
+
+    const commentsResult = await getCommentsForPost(postId);
+    if (!commentsResult.error) {
+      setCommentsMap((prev) => ({ ...prev, [postId]: commentsResult.data }));
+    }
+
+    await loadHome();
   };
 
   return (
@@ -332,62 +410,144 @@ export default function HomeScreen() {
               </Text>
             ) : (
               <View style={styles.feedList}>
-                {filteredFeed.map((item) => (
-                  <View key={item.post.id} style={styles.feedCard}>
-                    <View style={styles.feedTop}>
-                      <Avatar
-                        avatarUrl={item.profile?.avatar_url}
-                        emoji="✨"
-                        size={42}
-                      />
+                {filteredFeed.map((item) => {
+                  const expanded = expandedPostId === item.post.id;
+                  const comments = commentsMap[item.post.id] ?? [];
 
-                      <View style={styles.feedMetaWrap}>
-                        <Text style={styles.feedName}>
-                          {item.profile?.display_name || 'Unknown user'}
-                        </Text>
-                        <Text style={styles.feedMeta}>
-                          {[item.profile?.city, formatVisibility(item.post.visibility)]
-                            .filter(Boolean)
-                            .join(' • ')}
-                        </Text>
+                  return (
+                    <View key={item.post.id} style={styles.feedCard}>
+                      <View style={styles.feedTop}>
+                        <Avatar
+                          avatarUrl={item.profile?.avatar_url}
+                          emoji="✨"
+                          size={42}
+                        />
+
+                        <View style={styles.feedMetaWrap}>
+                          <Text style={styles.feedName}>
+                            {item.profile?.display_name || 'Unknown user'}
+                          </Text>
+                          <Text style={styles.feedMeta}>
+                            {[item.profile?.city, formatVisibility(item.post.visibility)]
+                              .filter(Boolean)
+                              .join(' • ')}
+                          </Text>
+                        </View>
                       </View>
-                    </View>
 
-                    {item.post.mood ? (
-                      <Text style={styles.feedMood}>Mood: {item.post.mood}</Text>
-                    ) : null}
+                      {item.post.mood ? (
+                        <Text style={styles.feedMood}>Mood: {item.post.mood}</Text>
+                      ) : null}
 
-                    <Text style={styles.feedContent}>{item.post.content}</Text>
+                      <Text style={styles.feedContent}>{item.post.content}</Text>
 
-                    <View style={styles.feedActions}>
-                      <Pressable
-                        style={[
-                          styles.feedActionButton,
-                          busyPostId === item.post.id && styles.feedActionButtonDisabled,
-                        ]}
-                        onPress={() => void handleLikeToggle(item)}
-                        disabled={busyPostId === item.post.id}
-                      >
-                        <Text style={styles.feedActionButtonText}>
-                          {item.liked_by_me ? 'Unlike' : 'Like'} ({item.like_count})
-                        </Text>
-                      </Pressable>
-
-                      {item.post.user_id === user?.id ? (
+                      <View style={styles.feedActions}>
                         <Pressable
                           style={[
-                            styles.deleteActionButton,
+                            styles.feedActionButton,
                             busyPostId === item.post.id && styles.feedActionButtonDisabled,
                           ]}
-                          onPress={() => void handleDeletePost(item)}
+                          onPress={() => void handleLikeToggle(item)}
                           disabled={busyPostId === item.post.id}
                         >
-                          <Text style={styles.deleteActionButtonText}>Delete</Text>
+                          <Text style={styles.feedActionButtonText}>
+                            {item.liked_by_me ? 'Unlike' : 'Like'} ({item.like_count})
+                          </Text>
                         </Pressable>
+
+                        <Pressable
+                          style={styles.feedActionButton}
+                          onPress={() => void handleToggleComments(item.post.id)}
+                        >
+                          <Text style={styles.feedActionButtonText}>
+                            Comments ({item.comment_count})
+                          </Text>
+                        </Pressable>
+
+                        {item.post.user_id === user?.id ? (
+                          <Pressable
+                            style={[
+                              styles.deleteActionButton,
+                              busyPostId === item.post.id && styles.feedActionButtonDisabled,
+                            ]}
+                            onPress={() => void handleDeletePost(item)}
+                            disabled={busyPostId === item.post.id}
+                          >
+                            <Text style={styles.deleteActionButtonText}>Delete</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+
+                      {expanded ? (
+                        <View style={styles.commentsWrap}>
+                          {comments.length === 0 ? (
+                            <Text style={styles.emptyText}>No comments yet.</Text>
+                          ) : (
+                            comments.map((commentItem) => (
+                              <View key={commentItem.comment.id} style={styles.commentCard}>
+                                <View style={styles.commentTop}>
+                                  <Text style={styles.commentAuthor}>
+                                    {commentItem.profile?.display_name || 'Unknown user'}
+                                  </Text>
+
+                                  {commentItem.comment.user_id === user?.id ? (
+                                    <Pressable
+                                      onPress={() =>
+                                        void handleDeleteComment(
+                                          item.post.id,
+                                          commentItem.comment.id
+                                        )
+                                      }
+                                      disabled={deletingCommentId === commentItem.comment.id}
+                                    >
+                                      <Text style={styles.commentDelete}>
+                                        {deletingCommentId === commentItem.comment.id
+                                          ? 'Deleting...'
+                                          : 'Delete'}
+                                      </Text>
+                                    </Pressable>
+                                  ) : null}
+                                </View>
+
+                                <Text style={styles.commentBody}>
+                                  {commentItem.comment.body}
+                                </Text>
+                              </View>
+                            ))
+                          )}
+
+                          <View style={styles.commentComposer}>
+                            <TextInput
+                              style={styles.commentInput}
+                              placeholder="Write a comment..."
+                              placeholderTextColor={palette.subtext}
+                              value={commentDrafts[item.post.id] ?? ''}
+                              onChangeText={(text) =>
+                                setCommentDrafts((prev) => ({
+                                  ...prev,
+                                  [item.post.id]: text,
+                                }))
+                              }
+                            />
+                            <Pressable
+                              style={[
+                                styles.commentButton,
+                                busyCommentPostId === item.post.id &&
+                                  styles.feedActionButtonDisabled,
+                              ]}
+                              onPress={() => void handleCreateComment(item.post.id)}
+                              disabled={busyCommentPostId === item.post.id}
+                            >
+                              <Text style={styles.commentButtonText}>
+                                {busyCommentPostId === item.post.id ? 'Posting...' : 'Comment'}
+                              </Text>
+                            </Pressable>
+                          </View>
+                        </View>
                       ) : null}
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </RetroCard>
@@ -584,6 +744,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     marginTop: 4,
+    flexWrap: 'wrap',
   },
   feedActionButton: {
     backgroundColor: palette.blush,
@@ -606,6 +767,56 @@ const styles = StyleSheet.create({
   },
   deleteActionButtonText: {
     color: palette.white,
+    fontWeight: '700',
+  },
+  commentsWrap: {
+    marginTop: 4,
+    gap: 10,
+  },
+  commentCard: {
+    backgroundColor: palette.surface,
+    borderRadius: 12,
+    padding: 12,
+    gap: 6,
+  },
+  commentTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  commentAuthor: {
+    color: palette.text,
+    fontWeight: '800',
+  },
+  commentDelete: {
+    color: palette.danger,
+    fontWeight: '700',
+  },
+  commentBody: {
+    color: palette.text,
+    lineHeight: 20,
+  },
+  commentComposer: {
+    gap: 10,
+  },
+  commentInput: {
+    backgroundColor: palette.surface,
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    color: palette.text,
+  },
+  commentButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: palette.accentDeep,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  commentButtonText: {
+    color: '#fff',
     fontWeight: '700',
   },
   emptyText: {
