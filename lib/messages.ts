@@ -56,13 +56,20 @@ export async function sendMessage(
 }
 
 export async function markMessagesAsRead(matchId: string, userId: string) {
+  const timestamp = new Date().toISOString();
+
   const { data, error } = await supabase
     .from('messages')
-    .update({ read_at: new Date().toISOString() })
+    .update({ read_at: timestamp })
     .eq('match_id', matchId)
     .neq('sender_user_id', userId)
     .is('read_at', null)
     .select();
+
+  console.log('MARK READ matchId:', matchId);
+  console.log('MARK READ userId:', userId);
+  console.log('MARK READ updated rows:', data?.length ?? 0);
+  console.log('MARK READ error:', error?.message ?? null);
 
   return {
     data: (data as Message[]) ?? [],

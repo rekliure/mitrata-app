@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Alert,
   Image,
@@ -10,7 +10,6 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { RetroCard } from '@/components/RetroCard';
 import { SectionTitle } from '@/components/SectionTitle';
@@ -19,6 +18,9 @@ import { updateMyProfile } from '@/lib/profile';
 import { getMyBlockedProfiles, unblockUser } from '@/lib/safety';
 import { palette } from '@/lib/theme';
 import type { Profile } from '@/types';
+
+const GENDER_OPTIONS = ['Male', 'Female', 'Non-binary', 'Prefer not to say'];
+const LOOKING_FOR_OPTIONS = ['Friendship', 'Dating', 'Both'];
 
 export default function ProfileScreen() {
   const { user, profile, signOut, refreshProfile } = useAuth();
@@ -71,7 +73,12 @@ export default function ProfileScreen() {
   const handleSave = async () => {
     if (!user) return;
 
-    if (!displayName.trim()) {
+    const cleanName = displayName.trim();
+    const cleanCity = city.trim();
+    const cleanCountry = country.trim();
+    const cleanBio = bio.trim();
+
+    if (!cleanName) {
       Alert.alert('Missing name', 'Please enter a display name.');
       return;
     }
@@ -86,16 +93,26 @@ export default function ProfileScreen() {
       }
     }
 
+    if (!gender) {
+      Alert.alert('Missing gender', 'Please choose a gender option.');
+      return;
+    }
+
+    if (!lookingFor) {
+      Alert.alert('Missing preference', 'Please choose what you are looking for.');
+      return;
+    }
+
     setSaving(true);
 
     const { error } = await updateMyProfile(user.id, {
-      display_name: displayName.trim(),
+      display_name: cleanName,
       age: parsedAge,
-      gender: gender.trim() || null,
-      city: city.trim() || null,
-      country: country.trim() || null,
-      looking_for: lookingFor.trim() || null,
-      bio: bio.trim() || null,
+      gender,
+      city: cleanCity || null,
+      country: cleanCountry || null,
+      looking_for: lookingFor,
+      bio: cleanBio || null,
     });
 
     setSaving(false);
@@ -180,6 +197,30 @@ export default function ProfileScreen() {
     );
   };
 
+  const handleRefreshAppData = async () => {
+    await refreshProfile();
+    await loadBlockedProfiles();
+    Alert.alert('Refreshed', 'Profile and safety data refreshed.');
+  };
+
+  const handleResetUnsavedEdits = () => {
+    setDisplayName(profile?.display_name ?? '');
+    setAge(profile?.age ? String(profile.age) : '');
+    setGender(profile?.gender ?? '');
+    setCity(profile?.city ?? '');
+    setCountry(profile?.country ?? '');
+    setLookingFor(profile?.looking_for ?? '');
+    setBio(profile?.bio ?? '');
+    Alert.alert('Reset', 'Unsaved edits have been restored to saved values.');
+  };
+
+  const handleNotificationsPlaceholder = () => {
+    Alert.alert(
+      'Coming soon',
+      'Notification preferences will be added in a later version.'
+    );
+  };
+
   const handleSignOut = async () => {
     await signOut();
   };
@@ -243,13 +284,28 @@ export default function ProfileScreen() {
           onChangeText={setAge}
         />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Gender"
-          placeholderTextColor={palette.subtext}
-          value={gender}
-          onChangeText={setGender}
-        />
+        <Text style={styles.label}>Gender</Text>
+        <View style={styles.choiceWrap}>
+          {GENDER_OPTIONS.map((option) => {
+            const active = gender === option;
+            return (
+              <Pressable
+                key={option}
+                style={[styles.choiceChip, active && styles.choiceChipActive]}
+                onPress={() => setGender(option)}
+              >
+                <Text
+                  style={[
+                    styles.choiceChipText,
+                    active && styles.choiceChipTextActive,
+                  ]}
+                >
+                  {option}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
         <TextInput
           style={styles.input}
@@ -267,13 +323,28 @@ export default function ProfileScreen() {
           onChangeText={setCountry}
         />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Looking for"
-          placeholderTextColor={palette.subtext}
-          value={lookingFor}
-          onChangeText={setLookingFor}
-        />
+        <Text style={styles.label}>Looking for</Text>
+        <View style={styles.choiceWrap}>
+          {LOOKING_FOR_OPTIONS.map((option) => {
+            const active = lookingFor === option;
+            return (
+              <Pressable
+                key={option}
+                style={[styles.choiceChip, active && styles.choiceChipActive]}
+                onPress={() => setLookingFor(option)}
+              >
+                <Text
+                  style={[
+                    styles.choiceChipText,
+                    active && styles.choiceChipTextActive,
+                  ]}
+                >
+                  {option}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
         <TextInput
           style={[styles.input, styles.bioInput]}
@@ -345,6 +416,32 @@ export default function ProfileScreen() {
         )}
       </RetroCard>
 
+      <RetroCard>
+        <Text style={styles.heading}>Settings</Text>
+
+        <View style={styles.settingsList}>
+          <Pressable style={styles.settingButton} onPress={handleRefreshAppData}>
+            <Text style={styles.settingTitle}>Refresh app data</Text>
+            <Text style={styles.settingSub}>Sync profile and safety state</Text>
+          </Pressable>
+
+          <Pressable style={styles.settingButton} onPress={handleResetUnsavedEdits}>
+            <Text style={styles.settingTitle}>Reset unsaved edits</Text>
+            <Text style={styles.settingSub}>Restore form fields to saved values</Text>
+          </Pressable>
+
+          <Pressable style={styles.settingButton} onPress={handleNotificationsPlaceholder}>
+            <Text style={styles.settingTitle}>Notifications</Text>
+            <Text style={styles.settingSub}>Preferences coming soon</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.versionCard}>
+          <Text style={styles.versionLabel}>App version</Text>
+          <Text style={styles.versionValue}>Mitrata V2 foundation</Text>
+        </View>
+      </RetroCard>
+
       <Pressable style={styles.signOutButton} onPress={handleSignOut}>
         <Text style={styles.signOutButtonText}>Sign out</Text>
       </Pressable>
@@ -388,6 +485,13 @@ const styles = StyleSheet.create({
     color: palette.text,
     marginBottom: 10,
   },
+  label: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: palette.text,
+    marginTop: 4,
+    marginBottom: 8,
+  },
   input: {
     backgroundColor: palette.surface,
     borderWidth: 1,
@@ -401,6 +505,28 @@ const styles = StyleSheet.create({
   bioInput: {
     minHeight: 100,
     textAlignVertical: 'top',
+  },
+  choiceWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  choiceChip: {
+    backgroundColor: palette.surfaceStrong,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  choiceChipActive: {
+    backgroundColor: palette.accentDeep,
+  },
+  choiceChipText: {
+    color: palette.text,
+    fontWeight: '700',
+  },
+  choiceChipTextActive: {
+    color: '#fff',
   },
   saveButton: {
     backgroundColor: palette.accentDeep,
@@ -473,6 +599,39 @@ const styles = StyleSheet.create({
   emptyText: {
     color: palette.subtext,
     lineHeight: 22,
+  },
+  settingsList: {
+    gap: 10,
+  },
+  settingButton: {
+    backgroundColor: palette.surfaceStrong,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  settingTitle: {
+    color: palette.text,
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  settingSub: {
+    color: palette.subtext,
+    marginTop: 4,
+  },
+  versionCard: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: palette.border,
+  },
+  versionLabel: {
+    color: palette.subtext,
+    fontSize: 13,
+  },
+  versionValue: {
+    color: palette.text,
+    fontWeight: '700',
+    marginTop: 4,
   },
   signOutButton: {
     backgroundColor: palette.blush,

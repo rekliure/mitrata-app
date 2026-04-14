@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
- Image,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -38,17 +38,12 @@ export default function MessagesScreen() {
   const [sending, setSending] = useState(false);
   const [removing, setRemoving] = useState(false);
 
-  const hasLoadedOnceRef = useRef(false);
-
   const selectedMatch =
     matches.find((match) => match.id === selectedMatchId) ?? null;
 
   const loadMessages = async (matchId: string, markRead = false) => {
     if (markRead && user) {
-      const readResult = await markMessagesAsRead(matchId, user.id);
-      if (readResult.error) {
-        console.log('markMessagesAsRead error:', readResult.error);
-      }
+      await markMessagesAsRead(matchId, user.id);
     }
 
     const result = await getMessagesForMatch(matchId);
@@ -133,7 +128,6 @@ export default function MessagesScreen() {
     }
 
     setLoading(false);
-    hasLoadedOnceRef.current = true;
   }, [user?.id, selectedMatchId]);
 
   useFocusEffect(
@@ -167,15 +161,18 @@ export default function MessagesScreen() {
 
     const result = await sendMessage(selectedMatch.id, user.id, text);
 
-    setSending(false);
-
     if (result.error) {
+      setSending(false);
       Alert.alert('Could not send message', result.error);
       return;
     }
 
     setDraft('');
+
+    await markMessagesAsRead(selectedMatch.id, user.id);
     await loadMessages(selectedMatch.id, true);
+
+    setSending(false);
   };
 
   const onUnfriend = async () => {
@@ -346,6 +343,7 @@ export default function MessagesScreen() {
             ) : (
               messages.map((message) => {
                 const mine = message.sender_user_id === user?.id;
+                const isSeen = !mine && !!message.read_at;
 
                 return (
                   <View
@@ -366,6 +364,10 @@ export default function MessagesScreen() {
 
                     {!mine && !message.read_at ? (
                       <Text style={styles.unreadLabel}>New</Text>
+                    ) : null}
+
+                    {isSeen ? (
+                      <Text style={styles.seenLabel}>Seen</Text>
                     ) : null}
                   </View>
                 );
@@ -525,6 +527,12 @@ const styles = StyleSheet.create({
   unreadLabel: {
     marginTop: 6,
     color: palette.accentDeep,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  seenLabel: {
+    marginTop: 6,
+    color: palette.subtext,
     fontSize: 12,
     fontWeight: '700',
   },
